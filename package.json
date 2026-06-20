@@ -1,10 +1,10 @@
 {
-  "name": "agent-spend",
+  "name": "coder-agentmeter",
   "version": "0.1.0",
   "description": "See where your coding-agent tokens go. One local command — Codex, Claude Code, Qwen Code, OpenCode & more. Zero upload.",
   "main": "src/index.js",
   "bin": {
-    "agent-spend": "src/index.js"
+    "coder-agentmeter": "src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",

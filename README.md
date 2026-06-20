@@ -1,4 +1,4 @@
-# agent-spend
+# coder-agentmeter
 
 See where your coding-agent tokens go. One local command, no upload.
 
@@ -16,7 +16,7 @@ header and see its own usage. Auto-detects whatever you have installed.
 ## Run
 
 ```bash
-npx agent-spend
+npx coder-agentmeter
 ```
 
 That's it — it opens a dashboard in your browser. Or from a clone:
@@ -33,9 +33,9 @@ npm start
 ## Options
 
 ```bash
-agent-spend --port 8080
-agent-spend --no-open
-agent-spend --codex-home ~/.codex
+coder-agentmeter --port 8080
+coder-agentmeter --no-open
+coder-agentmeter --codex-home ~/.codex
 ```
 
 Per-agent homes can be overridden via env: `CODEX_HOME`, `CLAUDE_HOME`,
