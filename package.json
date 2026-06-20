@@ -1,0 +1,27 @@
+{
+  "name": "codex-spend",
+  "version": "0.1.0",
+  "description": "See where your Codex tokens go. Local dashboard, zero upload.",
+  "main": "src/index.js",
+  "bin": {
+    "codex-spend": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/index.js && node --check src/server.js && node --check src/parser.js"
+  },
+  "keywords": [
+    "codex",
+    "openai",
+    "tokens",
+    "usage",
+    "analytics",
+    "dashboard"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.0",
+    "open": "^10.1.0"
+  }
+}

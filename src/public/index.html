@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Codex Spend</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+:root{
+  color-scheme:dark;
+  --canvas:#131418;--bg:#16171c;--surface:#1f2027;--surface-2:#25272f;--surface-3:#2a2c35;--elevated:#2d2f38;--overlay:rgba(0,0,0,.55);
+  --ink:#e3e2df;--muted:#b4b6bc;--soft:#888a92;--faint:#5d6068;
+  --line:#2f3138;--line-2:#3f4149;--line-3:#25272f;--focus:#d4a44a;
+  --brand:#d4a44a;--brand-fg:#1a1306;--brand-hover:#e0b25c;
+  --rose:#d68a8c;--rose-bg:rgba(209,135,137,.12);--rose-border:rgba(209,135,137,.30);
+  --green:#a3c98e;--green-bg:rgba(158,196,139,.12);--green-border:rgba(158,196,139,.30);
+  --blue:#87a9e0;--blue-bg:rgba(130,168,230,.12);--blue-border:rgba(130,168,230,.30);
+  --mauve:#c89cdf;--mauve-bg:rgba(195,154,230,.12);--mauve-border:rgba(195,154,230,.30);
+  --amber:#e3c281;--amber-bg:rgba(229,192,123,.12);--amber-border:rgba(229,192,123,.30);
+  --shadow:0 2px 4px rgba(0,0,0,.35),0 4px 12px rgba(0,0,0,.50);--shadow-strong:0 4px 8px rgba(0,0,0,.40),0 16px 32px rgba(0,0,0,.60);--inset:inset 0 1px 0 rgba(255,255,255,.04);--edge:inset 0 -1px 0 rgba(0,0,0,.40)
+}
+[data-theme="light"]{color-scheme:light;--canvas:#eef0f3;--bg:#f4f5f7;--surface:#fff;--surface-2:#fafbfc;--surface-3:#f0f1f4;--elevated:#fff;--overlay:rgba(20,22,26,.45);--ink:#1a1d23;--muted:#3d434c;--soft:#6b727d;--faint:#9aa0aa;--line:#e3e5e9;--line-2:#cdd0d6;--line-3:#eef0f3;--focus:#5a7896;--brand:#1a1d23;--brand-fg:#fff;--brand-hover:#2f3640;--rose:#ad6f73;--rose-bg:rgba(173,111,115,.10);--rose-border:rgba(173,111,115,.35);--green:#5f8a5f;--green-bg:rgba(95,138,95,.10);--green-border:rgba(95,138,95,.35);--blue:#4f7896;--blue-bg:rgba(79,120,150,.10);--blue-border:rgba(79,120,150,.35);--mauve:#886f9c;--mauve-bg:rgba(136,111,156,.10);--mauve-border:rgba(136,111,156,.35);--amber:#b08544;--amber-bg:rgba(176,133,68,.10);--amber-border:rgba(176,133,68,.35);--shadow:0 1px 2px rgba(20,22,26,.04),0 1px 3px rgba(20,22,26,.06);--shadow-strong:0 4px 8px rgba(20,22,26,.06),0 12px 28px rgba(20,22,26,.14);--inset:inset 0 1px 0 rgba(255,255,255,.6);--edge:inset 0 -1px 0 rgba(20,22,26,.08)}
+:root{--mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;--font:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+html{background:var(--canvas)}
+body{margin:0;font-family:var(--font);color:var(--ink);background:linear-gradient(180deg,var(--canvas),var(--bg));min-height:100vh;-webkit-font-smoothing:antialiased}
+button,input{font:inherit}
+.wrap{width:min(1160px,calc(100% - 40px));margin:0 auto;padding:22px 0 72px}
+.loading{min-height:70vh;display:grid;place-items:center;color:var(--muted);font-weight:700}
+@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.anim{animation:up .4s cubic-bezier(.2,0,.2,1) both}
+.view{animation:fade .28s ease both}
+/* header */
+header{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:22px}
+.brand{display:flex;align-items:center;gap:12px}
+.mark{width:36px;height:36px;border-radius:9px;color:var(--brand-fg);background:linear-gradient(160deg,var(--brand),var(--brand-hover));display:grid;place-items:center;font-weight:850;font-size:14px;letter-spacing:.02em;box-shadow:var(--edge)}
+h1{margin:0;font-size:18px;line-height:1.1;letter-spacing:-.01em}
+.sub{margin-top:3px;color:var(--soft);font-size:11px;font-family:var(--mono);max-width:44ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+.btn{cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 13px;border-radius:8px;font-size:12px;font-weight:700;box-shadow:var(--inset);transition:background-color .14s,border-color .14s,transform .14s}
+.btn:hover{background:var(--surface-2);border-color:var(--line-2);transform:translateY(-1px)}
+.btn:active{transform:translateY(0)}
+.btn.primary{background:var(--brand);color:var(--brand-fg);border-color:transparent}
+.btn.primary:hover{background:var(--brand-hover)}
+/* summary band: KPIs + rate */
+.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow),var(--inset);margin-bottom:14px}
+.kpi{background:var(--surface);padding:16px 18px}
+.kpi .label{color:var(--faint);font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.08em;font-family:var(--mono)}
+.kpi .value{margin-top:7px;font-size:25px;line-height:1;font-weight:780;letter-spacing:-.01em}
+.kpi .hint{margin-top:7px;color:var(--soft);font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ratebar{display:flex;align-items:center;gap:20px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow),var(--inset);padding:13px 18px;margin-bottom:20px}
+.ratebar .plan{display:flex;align-items:center;gap:9px;padding-right:18px;border-right:1px solid var(--line)}
+.ratebar .plan .name{font-size:14px;font-weight:800;text-transform:capitalize}
+.rl{flex:1;min-width:200px;display:flex;flex-direction:column;gap:6px}
+.rl-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.rl-top .k{font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.07em;font-family:var(--mono);color:var(--soft)}
+.rl-top .v{font-size:13px;font-weight:780;font-family:var(--mono)}
+.rl-track{height:7px;background:var(--surface-3);border-radius:999px;overflow:hidden}
+.rl-fill{height:100%;border-radius:inherit;transition:width .5s cubic-bezier(.2,0,.2,1)}
+.rl-reset{color:var(--soft);font-size:11px;font-weight:600;font-family:var(--mono)}
+/* tabs */
+.tabs{display:flex;gap:4px;padding:4px;background:var(--surface);border:1px solid var(--line);border-radius:11px;box-shadow:var(--inset);margin-bottom:20px;width:fit-content;max-width:100%;overflow:auto}
+.tab{cursor:pointer;border:0;background:transparent;color:var(--soft);padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;white-space:nowrap;transition:background-color .14s,color .14s}
+.tab:hover{color:var(--ink)}
+.tab.on{background:var(--brand);color:var(--brand-fg)}
+/* cards & grids */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow),var(--inset)}
+.section{padding:20px}
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+h2{margin:0;font-size:14px;letter-spacing:-.01em;font-weight:760}
+.muted{color:var(--soft);font-size:12px}
+.grid{display:grid;gap:16px}
+.row2{grid-template-columns:1fr 1fr;margin-top:16px}
+.mb{margin-bottom:16px}
+.badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:750;background:var(--blue-bg);border:1px solid var(--blue-border);color:var(--blue)}
+.warnbox{padding:12px 14px;margin-bottom:16px;color:var(--amber);background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:10px;font-size:13px;font-weight:650}
+canvas{width:100%;max-width:100%;display:block}
+.legend{display:flex;gap:14px;flex-wrap:wrap;color:var(--soft);font-size:12px;font-weight:650;margin-top:10px}
+.dot{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:6px;vertical-align:-1px}
+/* insights */
+.insights{display:grid;gap:11px}
+.insights.col{max-width:760px}
+.insight{padding:14px 16px;border:1px solid var(--line);border-radius:11px;background:var(--surface-2);box-shadow:var(--inset);border-left-width:3px}
+.insight .ihead{display:flex;align-items:center;gap:9px}
+.insight .ico{width:18px;height:18px;flex:none}
+.insight strong{font-size:13px;display:block;line-height:1.35}
+.insight .detail{display:block;color:var(--muted);font-size:12.5px;line-height:1.55;margin-top:7px}
+.insight .act{display:flex;gap:7px;color:var(--soft);font-size:12.5px;line-height:1.55;margin-top:9px;padding-top:9px;border-top:1px dashed var(--line)}
+.insight .act b{color:var(--ink);font-weight:750;flex:none}
+.warning{border-left-color:var(--amber)}.info{border-left-color:var(--blue)}.neutral{border-left-color:var(--green)}
+/* bar lists */
+.bar-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line-3)}
+.bar-row.click{cursor:pointer}
+.bar-row:last-child{border-bottom:0}
+.bar-row.click:hover .bar-name{color:var(--brand)}
+.bar-name{font-weight:720;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-track{height:6px;background:var(--surface-3);border-radius:999px;overflow:hidden;margin-top:7px}
+.bar-fill{height:100%;background:linear-gradient(90deg,var(--brand),var(--blue));border-radius:inherit}
+.num{text-align:right;font-family:var(--mono);font-weight:720;white-space:nowrap}
+/* prompts list */
+.plist{display:grid;gap:10px}
+.prow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;padding:13px 14px;border:1px solid var(--line);border-radius:11px;background:var(--surface-2);cursor:pointer;transition:border-color .14s,transform .14s}
+.prow:hover{border-color:var(--focus);transform:translateY(-1px)}
+.prow .rk{width:26px;height:26px;border-radius:7px;background:var(--surface-3);color:var(--soft);font-weight:800;display:grid;place-items:center;font-size:12px;font-family:var(--mono)}
+.prow .pt{font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.token-strip{display:flex;height:6px;border-radius:999px;overflow:hidden;background:var(--surface-3);margin-top:8px}
+.fresh{background:var(--blue)}.cached{background:var(--green)}.reason{background:var(--mauve)}.out{background:var(--amber)}
+/* weekday */
+.wk{display:grid;gap:10px}
+.wk-row{display:grid;grid-template-columns:34px 1fr auto;gap:11px;align-items:center}
+.wk-row .d{font-size:11px;font-weight:750;color:var(--soft);font-family:var(--mono)}
+.wk-track{height:8px;background:var(--surface-3);border-radius:999px;overflow:hidden}
+.wk-fill{height:100%;background:linear-gradient(90deg,var(--mauve),var(--brand));border-radius:inherit}
+/* sessions table */
+.table-card{overflow:hidden}
+.table-top{display:flex;align-items:center;justify-content:space-between;padding:15px 18px;gap:12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.table-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--soft);border-radius:999px;padding:5px 10px;font-size:11px;font-weight:700;transition:all .14s}
+.chip:hover{border-color:var(--line-2);color:var(--ink)}
+.chip.on{background:var(--brand);color:var(--brand-fg);border-color:transparent}
+.search{width:min(260px,100%);border:1px solid var(--line);background:var(--surface-2);color:var(--ink);border-radius:8px;padding:9px 11px;outline:none}
+.search::placeholder{color:var(--faint)}
+.search:focus{border-color:var(--focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--focus) 20%,transparent)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--faint);font-size:10px;text-transform:uppercase;letter-spacing:.08em;background:var(--surface-2);cursor:pointer;user-select:none;font-family:var(--mono);font-weight:650;white-space:nowrap}
+th .ar{opacity:.55;margin-left:3px}
+th,td{padding:12px 14px;border-bottom:1px solid var(--line-3);vertical-align:top}
+tr:last-child td{border-bottom:0}
+tbody tr{cursor:pointer;transition:background-color .14s}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)}
+.title{font-weight:720;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.selected td{background:var(--amber-bg)!important}
+.empty{padding:38px;color:var(--soft);text-align:center}
+/* drawer */
+.scrim{position:fixed;inset:0;background:var(--overlay);backdrop-filter:blur(3px);z-index:50;opacity:0;pointer-events:none;transition:opacity .25s}
+.scrim.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;height:100vh;width:min(760px,100%);background:var(--bg);border-left:1px solid var(--line);box-shadow:var(--shadow-strong);z-index:51;transform:translateX(100%);transition:transform .3s cubic-bezier(.2,0,.2,1);display:flex;flex-direction:column;overflow:hidden}
+.drawer.open{transform:none}
+#drawerContent{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;width:100%}
+.drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:18px 20px;border-bottom:1px solid var(--line);background:var(--surface);flex:none}
+.drawer-title{font-size:16px;font-weight:790;line-height:1.35}
+.drawer-meta{margin-top:5px;color:var(--soft);font-size:12px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.iconbtn{cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--muted);width:32px;height:32px;border-radius:8px;font-size:16px;line-height:1;display:grid;place-items:center;flex:none}
+.iconbtn:hover{background:var(--surface-2);color:var(--ink)}
+.drawer-body{padding:18px 20px;overflow-y:auto;overflow-x:hidden;display:grid;gap:16px;min-width:0;flex:1 1 auto;min-height:0;-webkit-overflow-scrolling:touch}
+.drawer-body>*{min-width:0;max-width:100%}
+.mini-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.mini{border:1px solid var(--line);border-radius:9px;background:var(--surface-2);padding:10px}
+.mini .label{color:var(--faint);font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono)}
+.mini .value{font-size:17px;margin-top:5px;font-weight:780}
+.prompt-rail{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.prail-item{flex:0 0 220px;border:1px solid var(--line);background:var(--surface-2);border-radius:9px;padding:10px;cursor:pointer;transition:border-color .14s}
+.prail-item:hover,.prail-item.active{border-color:var(--focus)}
+.prail-item .pt{font-size:12px;font-weight:680;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.prompt-full{white-space:pre-wrap;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:13px;font-size:12.5px;line-height:1.55;max-height:160px;overflow:auto;font-family:var(--mono)}
+.tool-chip{display:inline-flex;margin:5px 5px 0 0;padding:2px 7px;border:1px solid var(--mauve-border);border-radius:999px;background:var(--mauve-bg);color:var(--mauve);font-size:11px;font-weight:720}
+.turns{display:grid;gap:8px}
+.turn{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2)}
+.turn .rk{width:26px;height:26px;border-radius:7px;background:var(--amber-bg);border:1px solid var(--amber-border);color:var(--amber);font-weight:800;display:grid;place-items:center;font-size:11px}
+/* share overlay */
+.overlay{position:fixed;inset:0;background:var(--overlay);backdrop-filter:blur(4px);z-index:60;display:none;align-items:center;justify-content:center;padding:20px}
+.overlay.open{display:flex}
+.share-box{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-strong);padding:20px;width:min(680px,100%);max-height:92vh;overflow:auto}
+.share-box h3{margin:0 0 4px;font-size:16px}
+.share-box p{margin:0 0 14px;color:var(--soft);font-size:13px}
+.share-box canvas{width:100%;height:auto;border-radius:10px;border:1px solid var(--line)}
+.share-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
+.chart-tip{position:fixed;z-index:70;pointer-events:none;background:var(--elevated);border:1px solid var(--line-2);border-radius:9px;box-shadow:var(--shadow-strong);padding:9px 11px;font-size:12px;color:var(--ink);opacity:0;transform:translateY(4px);transition:opacity .12s,transform .12s;max-width:260px;left:0;top:0}
+.chart-tip.on{opacity:1;transform:none}
+.chart-tip .t{font-weight:760;margin-bottom:5px;font-size:12px}
+.chart-tip .r{display:flex;align-items:center;justify-content:space-between;gap:16px;color:var(--soft);font-family:var(--mono);font-size:11px;line-height:1.7}
+.chart-tip .r b{color:var(--ink);font-weight:700}
+.chart-tip .r i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:6px;font-style:normal}
+.hoverable{cursor:crosshair}
+@media(max-width:860px){.summary{grid-template-columns:1fr 1fr}.row2{grid-template-columns:1fr}.ratebar .plan{border-right:0}.mini-stats{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.wrap{width:min(100% - 24px,1160px)}header{flex-direction:column;align-items:flex-start}.actions{justify-content:flex-start}th:nth-child(3),td:nth-child(3),th:nth-child(7),td:nth-child(7){display:none}}
+</style>
+</head>
+<body>
+<div id="app" class="loading">Loading Codex usage&hellip;</div>
+<div class="scrim" id="scrim" onclick="closeDrawer()"></div>
+<div class="chart-tip" id="chartTip"></div>
+<aside class="drawer" id="drawer" aria-hidden="true"><div id="drawerContent"></div></aside>
+<div class="overlay" id="shareOverlay" onclick="if(event.target===this)closeShare()">
+  <div class="share-box">
+    <h3>Share your Codex stats</h3>
+    <p>A 1200&times;630 image rendered from your local data. Nothing is uploaded.</p>
+    <canvas id="shareCanvas" width="1200" height="630"></canvas>
+    <div class="share-actions">
+      <button class="btn" onclick="closeShare()">Close</button>
+      <button class="btn primary" onclick="downloadShare()">Download PNG</button>
+    </div>
+  </div>
+</div>
+<script>
+let DATA=null, sort={key:'updatedTimestamp',dir:'desc'}, query='', modelFilter='';
+let activeTab=localStorage.getItem('codex-spend-tab')||'overview';
+let selectedSessionId=null, selectedPromptRank=null, rlTimer=null;
+let theme=localStorage.getItem('codex-spend-theme')||'dark';
+document.documentElement.dataset.theme=theme;
+const cssVar=name=>getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const themeColor=cssVar;
+const fmt=n=>{n=Number(n||0);if(n>=1_000_000)return(n/1_000_000).toFixed(1)+'M';if(n>=10_000)return Math.round(n/1000)+'K';if(n>=1000)return(n/1000).toFixed(1)+'K';return n.toLocaleString()};
+const dateFmt=v=>!v||v==='unknown'?'unknown':new Date(v).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+const timeFmt=v=>!v?'':new Date(v).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+const q1=s=>String(s).replace(/'/g,'&#039;');
+const freshInput=o=>Math.max(0,(o.inputTokens||0)-(o.cachedInputTokens||0));
+const visibleOut=o=>Math.max(0,(o.outputTokens||0)-(o.reasoningOutputTokens||0));
+
+async function fetchData(refresh=false){
+  const res=await fetch(refresh?'/api/refresh':'/api/data');
+  if(!res.ok)throw new Error((await res.json()).error||'Failed to load data');
+  if(refresh){DATA=await(await fetch('/api/data')).json()}else DATA=await res.json();
+  if(!selectedSessionId&&DATA.sessions[0])selectedSessionId=DATA.sessions[0].sessionId;
+  render();
+}
+
+function render(){
+  const t=DATA.totals, app=document.getElementById('app');
+  app.className='wrap';
+  const cachePct=t.totalTokens?Math.round(t.cachedInputTokens/t.totalTokens*100):0;
+  const reasonPct=t.outputTokens?Math.round(t.reasoningOutputTokens/t.outputTokens*100):0;
+  app.innerHTML=`
+<header class="anim"><div class="brand"><div class="mark">CX</div><div><h1>Codex Spend</h1><div class="sub" title="${esc(DATA.codexHome)}">${esc(DATA.codexHome)}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div></header>
+${DATA.warnings?.length?`<div class="warnbox anim">${DATA.warnings.map(w=>esc(w.message)).join('<br>')}</div>`:''}
+${!DATA.sessions.length?'<div class="card empty anim">No Codex sessions found in '+esc(DATA.codexHome)+'.</div>':`
+<div class="summary anim">
+  ${kpi('Total Tokens',fmt(t.totalTokens),`${fmt(t.inputTokens)} in · ${fmt(t.outputTokens)} out`)}
+  ${kpi('Cached Input',fmt(t.cachedInputTokens),`${cachePct}% of all tokens`)}
+  ${kpi('Reasoning',fmt(t.reasoningOutputTokens),`${reasonPct}% of output`)}
+  ${kpi('Sessions',fmt(t.totalSessions),`${fmt(t.totalPrompts)} prompts · ${fmt(t.totalToolCalls)} tools`)}
+</div>
+${ratebar(t.latestRateLimit)}
+<div class="tabs anim">
+  ${tabBtn('overview','Overview')}${tabBtn('sessions','Sessions')}${tabBtn('prompts','Prompts')}${tabBtn('insights',`Insights · ${DATA.insights.length}`)}
+</div>
+<div id="view" class="view"></div>`}`;
+  if(DATA.sessions.length){renderView();startRlTimer()}
+}
+
+function kpi(label,value,hint){return`<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="hint">${esc(hint)}</div></div>`}
+function tabBtn(id,label){return`<button class="tab ${activeTab===id?'on':''}" onclick="setTab('${id}')">${label}</button>`}
+function setTab(id){activeTab=id;localStorage.setItem('codex-spend-tab',id);document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick').includes("'"+id+"'")));renderView()}
+function toggleTheme(){theme=theme==='dark'?'light':'dark';localStorage.setItem('codex-spend-theme',theme);document.documentElement.dataset.theme=theme;render()}
+
+function renderView(){
+  const v=document.getElementById('view');if(!v)return;
+  v.classList.remove('view');void v.offsetWidth;v.classList.add('view');
+  if(activeTab==='overview')v.innerHTML=overviewView();
+  else if(activeTab==='sessions')v.innerHTML=sessionsView();
+  else if(activeTab==='prompts')v.innerHTML=promptsView();
+  else v.innerHTML=insightsView();
+  if(activeTab==='overview'){drawDailyChart();drawModelChart()}
+  if(activeTab==='sessions')wireSessions();
+}
+
+/* ===== OVERVIEW ===== */
+function overviewView(){return`
+<section class="card section mb"><div class="section-head"><h2>Daily Usage</h2><span class="muted">${DATA.dailyUsage.length} days</span></div><canvas id="dailyChart" height="220"></canvas><div class="legend">${legend()}</div></section>
+<div class="grid row2" style="margin-top:0">
+  <section class="card section"><div class="section-head"><h2>Model Share</h2><span class="muted">${DATA.modelBreakdown.length} models</span></div><canvas id="modelChart" height="210"></canvas></section>
+  <section class="card section"><div class="section-head"><h2>Top Projects</h2></div>${barList(DATA.projectBreakdown.slice(0,7),'project','totalTokens','openProject')}</section>
+</div>
+<div class="grid row2">
+  <section class="card section"><div class="section-head"><h2>By Weekday</h2><span class="muted">avg / session</span></div>${weekdayList()}</section>
+  <section class="card section"><div class="section-head"><h2>Tools</h2></div>${barList(DATA.toolBreakdown.slice(0,8),'tool','count',null)}</section>
+</div>`}
+function legend(){return`<span><i class="dot" style="background:var(--blue)"></i>Fresh input</span><span><i class="dot" style="background:var(--green)"></i>Cached input</span><span><i class="dot" style="background:var(--mauve)"></i>Reasoning</span><span><i class="dot" style="background:var(--amber)"></i>Output</span>`}
+
+/* ===== SESSIONS ===== */
+function sessionsView(){return`
+<section class="card table-card">
+  <div class="table-top"><div><h2>Sessions</h2><div class="muted">${DATA.sessions.length} parsed · click a row to inspect</div></div><div class="table-tools"><div class="chips">${modelChips()}</div><input id="search" class="search" placeholder="Search sessions…" value="${esc(query)}"></div></div>
+  <table><thead><tr>
+    <th data-sort="updatedTimestamp">Updated${arrow('updatedTimestamp')}</th>
+    <th data-sort="title">Session${arrow('title')}</th>
+    <th data-sort="project">Project${arrow('project')}</th>
+    <th data-sort="model">Model${arrow('model')}</th>
+    <th class="num" data-sort="totalTokens">Tokens${arrow('totalTokens')}</th>
+    <th class="num" data-sort="promptCount">Prompts${arrow('promptCount')}</th>
+    <th class="num" data-sort="turnCount">Turns${arrow('turnCount')}</th>
+    <th class="num" data-sort="toolCount">Tools${arrow('toolCount')}</th>
+  </tr></thead><tbody id="sessionsBody"></tbody></table>
+</section>`}
+function arrow(key){return sort.key===key?`<span class="ar">${sort.dir==='desc'?'▾':'▴'}</span>`:''}
+function modelChips(){const models=DATA.modelBreakdown.map(m=>m.model);return [`<span class="chip ${modelFilter===''?'on':''}" onclick="setModel('')">All</span>`].concat(models.map(m=>`<span class="chip ${modelFilter===m?'on':''}" onclick="setModel('${q1(esc(m))}')">${esc(m)}</span>`)).join('')}
+function setModel(m){modelFilter=m;renderView()}
+function wireSessions(){renderRows();document.querySelectorAll('th[data-sort]').forEach(th=>{th.onclick=()=>{const key=th.dataset.sort;sort={key,dir:sort.key===key&&sort.dir==='desc'?'asc':'desc'};renderView()}});const sb=document.getElementById('search');if(sb)sb.oninput=e=>{query=e.target.value;renderRows()}}
+function renderRows(){const tbody=document.getElementById('sessionsBody');if(!tbody)return;let rows=[...DATA.sessions];if(modelFilter)rows=rows.filter(s=>s.model===modelFilter);if(query.trim()){const qq=query.toLowerCase();rows=rows.filter(s=>(s.title||'').toLowerCase().includes(qq)||(s.project||'').toLowerCase().includes(qq)||(s.model||'').toLowerCase().includes(qq))}rows.sort((a,b)=>{const av=a[sort.key]??'',bv=b[sort.key]??'';const cmp=typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv));return sort.dir==='desc'?-cmp:cmp});tbody.innerHTML=rows.length?rows.map(s=>`<tr class="${s.sessionId===selectedSessionId?'selected':''}" onclick="openSession('${s.sessionId}')"><td>${dateFmt(s.updatedTimestamp||s.timestamp)}<div class="muted">${s.archived?'archived':'active'}</div></td><td><div class="title" title="${esc(s.title)}">${esc(s.title)}</div><div class="muted">${esc(s.sessionId).slice(0,18)}…</div></td><td>${esc(s.project)}</td><td><span class="badge">${esc(s.model)}</span></td><td class="num">${fmt(s.totalTokens)}</td><td class="num">${fmt(s.promptCount)}</td><td class="num">${fmt(s.turnCount)}</td><td class="num">${fmt(s.toolCount)}</td></tr>`).join(''):'<tr><td colspan="8" class="empty">No sessions match this filter.</td></tr>'}
+function openProject(project){query=project;modelFilter='';setTab('sessions')}
+
+/* ===== PROMPTS ===== */
+function promptsView(){const items=DATA.topPrompts.slice(0,25);if(!items.length)return'<div class="card empty">No prompt data yet.</div>';const max=Math.max(...items.map(i=>i.totalTokens||0),1);return`<section class="card section"><div class="section-head"><h2>Most Expensive Prompts</h2><span class="muted">top ${items.length} · click to drill in</span></div><div class="plist">${items.map((p,i)=>`<div class="prow" onclick="openSession('${p.sessionId}',${promptRankForTop(p)})"><div class="rk">${i+1}</div><div><div class="pt" title="${esc(p.prompt)}">${esc(p.prompt)}</div><div class="muted" style="margin-top:3px">${esc(p.project)} · ${fmt(p.turnCount)} turns · ${toolText(p.tools)}</div><div class="token-strip" style="width:${Math.max(14,(p.totalTokens/max)*100)}%">${strip(p)}</div></div><div class="num">${fmt(p.totalTokens)}<div class="muted" style="font-weight:600">tokens</div></div></div>`).join('')}</div></section>`}
+function promptRankForTop(p){const s=DATA.sessions.find(x=>x.sessionId===p.sessionId);const match=s?.promptBreakdown.find(x=>x.prompt===p.prompt&&x.totalTokens===p.totalTokens);return match?match.rank:1}
+function toolText(tools){return tools?.length?tools.slice(0,2).map(t=>`${t.tool} ${t.count}`).join(' · '):'no tools'}
+function strip(o){const total=Math.max(o.totalTokens||((o.inputTokens||0)+(o.outputTokens||0)),1),fresh=freshInput(o),cached=o.cachedInputTokens||0,reason=o.reasoningOutputTokens||0,out=visibleOut(o);return`<span class="fresh" style="width:${fresh/total*100}%"></span><span class="cached" style="width:${cached/total*100}%"></span><span class="reason" style="width:${reason/total*100}%"></span><span class="out" style="width:${out/total*100}%"></span>`}
+
+/* ===== INSIGHTS ===== */
+function insightsView(){const ins=DATA.insights.length?DATA.insights:[{type:'neutral',title:'Usage parsed',detail:'Open a session to inspect prompt-level token tracking.'}];return`<section class="card section"><div class="section-head"><h2>Insights</h2><span class="muted">${ins.length} findings from your local data</span></div><div class="insights col">${ins.map(insight).join('')}</div></section>`}
+function insightIcon(type){const c={warning:'--amber',info:'--blue',neutral:'--green'}[type]||'--blue';const path={warning:'M12 2 1 21h22z M12 9v5 M12 17v.5',info:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20 M12 11v6 M12 7v.5',neutral:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20 M8 12l3 3 5-6'}[type]||'';return`<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="var(${c})" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`}
+function insight(x){return`<div class="insight ${esc(x.type)}"><div class="ihead">${insightIcon(x.type)}<strong>${esc(x.title)}</strong></div><span class="detail">${esc(x.detail)}</span>${x.action?`<span class="act"><b>Try&nbsp;this:</b><span>${esc(x.action)}</span></span>`:''}</div>`}
+
+/* ===== shared widgets ===== */
+function barList(items,nameKey,valueKey,clicker){if(!items.length)return'<div class="empty">No data yet.</div>';const max=Math.max(...items.map(i=>i[valueKey]||0),1);return items.map(item=>`<div class="bar-row ${clicker?'click':''}" ${clicker?`onclick="${clicker}('${q1(esc(String(item[nameKey])))}')"`:''}><div><div class="bar-name" title="${esc(item[nameKey])}">${esc(item[nameKey])}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(3,(item[valueKey]||0)/max*100)}%"></div></div></div><div class="num">${fmt(item[valueKey])}</div></div>`).join('')}
+function weekdayList(){const w=DATA.weekdayUsage||[];if(!w.length)return'<div class="empty">No weekday data.</div>';const max=Math.max(...w.map(d=>d.avgTokens||0),1);return`<div class="wk">${w.map(d=>`<div class="wk-row"><span class="d">${d.name.slice(0,3)}</span><div class="wk-track"><div class="wk-fill" style="width:${Math.max(3,(d.avgTokens||0)/max*100)}%"></div></div><span class="num" style="font-size:12px">${fmt(d.avgTokens)}</span></div>`).join('')}</div>`}
+
+/* ===== DRAWER (session drilldown) ===== */
+function openSession(id,rank=null){const session=DATA.sessions.find(s=>s.sessionId===id);if(!session)return;selectedSessionId=id;selectedPromptRank=(rank&&session.promptBreakdown.some(p=>p.rank===rank))?rank:(session.promptBreakdown[0]?.rank||1);document.getElementById('drawer').classList.add('open');document.getElementById('scrim').classList.add('open');document.getElementById('drawer').setAttribute('aria-hidden','false');document.body.style.overflow='hidden';renderDrawer();if(document.getElementById('sessionsBody'))renderRows()}
+function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('scrim').classList.remove('open');document.getElementById('drawer').setAttribute('aria-hidden','true');document.body.style.overflow=''}
+function selectPrompt(rank){selectedPromptRank=rank;renderDrawer()}
+function renderDrawer(){const session=DATA.sessions.find(s=>s.sessionId===selectedSessionId);if(!session)return;const p=session.promptBreakdown.find(x=>x.rank===selectedPromptRank)||session.promptBreakdown[0];const ctxPct=session.contextWindow&&session.peakInputTokens?Math.round(session.peakInputTokens/session.contextWindow*100):null;
+document.getElementById('drawerContent').innerHTML=`
+<div class="drawer-head"><div><div class="drawer-title">${esc(session.title)}</div><div class="drawer-meta"><span>${esc(session.project)}</span>·<span class="badge">${esc(session.model)}</span>·<span>${fmt(session.totalTokens)} tokens</span>·<span>${fmt(session.promptCount)} prompts</span>${ctxPct!=null?`·<span>peak ctx ${ctxPct}%</span>`:''}</div></div><button class="iconbtn" onclick="closeDrawer()" title="Close">×</button></div>
+<div class="drawer-body">
+  <div><div class="muted" style="margin-bottom:8px;font-weight:700">Prompts in session (${session.promptBreakdown.length})</div><div class="prompt-rail">${session.promptBreakdown.map(pp=>`<div class="prail-item ${pp.rank===selectedPromptRank?'active':''}" onclick="selectPrompt(${pp.rank})"><div class="pt">${esc(pp.prompt)}</div><div class="muted" style="margin-top:5px;font-size:11px">${fmt(pp.totalTokens)} · ${fmt(pp.turnCount)} turns</div><div class="token-strip">${strip(pp)}</div></div>`).join('')}</div></div>
+  ${p?promptDetail(p):''}
+</div>`;
+  if(p)requestAnimationFrame(()=>requestAnimationFrame(()=>drawTurnChart(p)))}
+function promptDetail(p){return`<div><div class="section-head"><h2>Prompt #${p.rank}</h2><span class="badge">${esc(p.model)}</span></div><div class="prompt-full">${esc(p.prompt)}</div></div>
+<div class="mini-stats"><div class="mini"><div class="label">Total</div><div class="value">${fmt(p.totalTokens)}</div></div><div class="mini"><div class="label">Fresh In</div><div class="value">${fmt(freshInput(p))}</div></div><div class="mini"><div class="label">Cached</div><div class="value">${fmt(p.cachedInputTokens)}</div></div><div class="mini"><div class="label">Reasoning</div><div class="value">${fmt(p.reasoningOutputTokens)}</div></div><div class="mini"><div class="label">Turns</div><div class="value">${fmt(p.turnCount)}</div></div></div>
+<div class="card section" style="padding:14px"><div class="muted" style="font-weight:700;margin-bottom:6px">Token cost per turn</div><canvas id="turnChart" height="170"></canvas></div>
+${(p.tools||[]).length?`<div>${p.tools.map(t=>`<span class="tool-chip">${esc(t.tool)} · ${fmt(t.count)}</span>`).join('')}</div>`:''}
+<div class="turns">${p.turns.map((t,i)=>`<div class="turn"><div class="rk">${i+1}</div><div><strong style="font-size:12px">${timeFmt(t.timestamp)}</strong><div class="muted">${esc(t.model)}${t.contextWindow?' · ctx '+fmt(t.contextWindow):''}</div><div class="token-strip">${strip(t)}</div></div><div class="num">${fmt(t.totalTokens)}<div class="muted" style="font-weight:600">${fmt(freshInput(t))} fresh · ${fmt(t.cachedInputTokens)} cached · ${fmt(t.outputTokens)} out</div></div></div>`).join('')}</div>`}
+
+/* ===== rate-limit bar ===== */
+function windowLabel(min){if(!min)return'window';if(min%1440===0)return(min/1440)+'-day';if(min%60===0)return(min/60)+'-hour';return min+'-min'}
+function resetText(unixSec){if(!unixSec)return'';const ms=unixSec*1000-Date.now();if(ms<=0)return'resetting now';const m=Math.floor(ms/60000),h=Math.floor(m/60),d=Math.floor(h/24);if(d>=1)return`resets in ${d}d ${h%24}h`;if(h>=1)return`resets in ${h}h ${m%60}m`;return`resets in ${m}m`}
+function rlColor(pct){if(pct==null)return'var(--blue)';if(pct>=80)return'var(--rose)';if(pct>=50)return'var(--amber)';return'var(--green)'}
+function rlSeg(k,win,pct,reset){const p=pct==null?0:pct;return`<div class="rl"><div class="rl-top"><span class="k">${k} · ${windowLabel(win)}</span><span class="v" style="color:${rlColor(pct)}">${pct==null?'n/a':pct+'%'}</span></div><div class="rl-track"><div class="rl-fill" style="width:${Math.min(100,p)}%;background:${rlColor(pct)}"></div></div><div class="rl-reset" data-reset="${reset||''}">${reset?resetText(reset):'no reset recorded'}</div></div>`}
+function ratebar(r){if(!r)return'';return`<div class="ratebar anim"><div class="plan"><span class="muted" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Plan</span><span class="name">${esc(r.planType||'unknown')}</span>${r.reachedType?`<span class="badge" style="background:var(--rose-bg);border-color:var(--rose-border);color:var(--rose)">limit hit</span>`:''}</div>${rlSeg('Primary',r.primaryWindowMinutes,r.primaryUsedPercent,r.primaryResetsAt)}${rlSeg('Weekly',r.secondaryWindowMinutes,r.secondaryUsedPercent,r.secondaryResetsAt)}</div>`}
+function startRlTimer(){if(rlTimer)clearInterval(rlTimer);rlTimer=setInterval(()=>{document.querySelectorAll('.rl-reset[data-reset]').forEach(el=>{const v=el.getAttribute('data-reset');if(v)el.textContent=resetText(Number(v))})},30000)}
+
+/* ===== charts ===== */
+function setupCanvas(id,h){const c=document.getElementById(id);if(!c)return null;const ctx=c.getContext('2d'),dpr=Math.min(window.devicePixelRatio||1,2);let w=c.clientWidth||(c.parentElement&&c.parentElement.clientWidth)||600;w=Math.max(120,Math.min(w,2400));h=h||c.height||210;c.width=Math.round(w*dpr);c.height=Math.round(h*dpr);c.style.height=h+'px';ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);return{ctx,width:w,height:h,el:c}}
+/* ---- chart tooltips ---- */
+function showTip(html,cx,cy){const t=document.getElementById('chartTip');if(!t)return;t.innerHTML=html;t.classList.add('on');const r=t.getBoundingClientRect(),pad=16;let x=cx+pad,y=cy+pad;if(x+r.width>window.innerWidth-8)x=cx-r.width-pad;if(y+r.height>window.innerHeight-8)y=cy-r.height-pad;t.style.left=Math.max(8,x)+'px';t.style.top=Math.max(8,y)+'px'}
+function hideTip(){const t=document.getElementById('chartTip');if(t)t.classList.remove('on')}
+function tipRow(color,label,val){return`<div class="r"><span>${color?`<i style="background:${color}"></i>`:''}${esc(label)}</span><b>${val}</b></div>`}
+function bindHover(el,kind,hits,geo){if(!el)return;el.classList.add('hoverable');el.onmousemove=e=>{const rect=el.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;let hit=null;if(kind==='bar'){hit=hits.find(h=>mx>=h.x0&&mx<=h.x1)}else if(kind==='point'){let bd=26;for(const h of hits){const d=Math.abs(mx-h.x);if(d<bd){bd=d;hit=h}}}else if(kind==='wedge'){const dx=mx-geo.cx,dy=my-geo.cy,dist=Math.hypot(dx,dy);if(dist<=geo.r+2&&dist>=geo.inner-2){let a=Math.atan2(dy,dx);if(a<-Math.PI/2)a+=Math.PI*2;hit=hits.find(h=>a>=h.start&&a<h.end)}}if(hit){showTip(hit.html,e.clientX,e.clientY)}else hideTip()};el.onmouseleave=hideTip}
+function drawDailyChart(){const s=setupCanvas('dailyChart',220);if(!s)return;const{ctx,width,height,el}=s,data=DATA.dailyUsage.slice(-30);if(!data.length)return;const pad={l:46,r:14,t:16,b:34},cw=width-pad.l-pad.r,ch=height-pad.t-pad.b,max=Math.max(...data.map(d=>d.totalTokens),1),bw=Math.max(5,cw/data.length*.62),hits=[];ctx.font='11px '+(cssVar('--mono')||'monospace');ctx.fillStyle=themeColor('--soft');ctx.textAlign='right';for(let i=0;i<=3;i++){const y=pad.t+ch-(i/3)*ch;ctx.fillText(fmt(max*i/3),pad.l-8,y+4);ctx.strokeStyle=themeColor('--line-3');ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(width-pad.r,y);ctx.stroke()}const C={blue:themeColor('--blue'),green:themeColor('--green'),mauve:themeColor('--mauve'),amber:themeColor('--amber')};data.forEach((d,i)=>{const bandX=pad.l+i*cw/data.length,x=bandX+(cw/data.length-bw)/2;let y=pad.t+ch;[[C.blue,freshInput(d)],[C.green,d.cachedInputTokens||0],[C.mauve,d.reasoningOutputTokens||0],[C.amber,visibleOut(d)]].forEach(([color,val])=>{const hh=val/max*ch;y-=hh;ctx.fillStyle=color;ctx.fillRect(x,y,bw,hh)});hits.push({x0:bandX,x1:bandX+cw/data.length,html:`<div class="t">${dateFmt(d.date)} · ${fmt(d.totalTokens)} tokens</div>${tipRow(C.blue,'Fresh input',fmt(freshInput(d)))}${tipRow(C.green,'Cached input',fmt(d.cachedInputTokens||0))}${tipRow(C.mauve,'Reasoning',fmt(d.reasoningOutputTokens||0))}${tipRow(C.amber,'Output',fmt(visibleOut(d)))}${tipRow('','Sessions',fmt(d.sessions||0))}`});if(i%Math.ceil(data.length/6)===0||i===data.length-1){ctx.fillStyle=themeColor('--soft');ctx.textAlign='center';ctx.fillText(dateFmt(d.date),x+bw/2,height-10)}});bindHover(el,'bar',hits)}
+function drawModelChart(){const s=setupCanvas('modelChart',210);if(!s)return;const{ctx,width,el}=s,data=DATA.modelBreakdown.slice(0,8);if(!data.length)return;const colors=[themeColor('--blue'),themeColor('--green'),themeColor('--amber'),themeColor('--mauve'),themeColor('--rose'),themeColor('--brand'),themeColor('--muted'),themeColor('--faint')],total=data.reduce((a,b)=>a+b.totalTokens,0)||1,cx=width/2,cy=88,r=Math.min(74,width/4),inner=r*.56,hits=[];let start=-Math.PI/2;data.forEach((item,i)=>{const ang=item.totalTokens/total*Math.PI*2,col=colors[i%colors.length];ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,start,start+ang);ctx.closePath();ctx.fillStyle=col;ctx.fill();hits.push({start,end:start+ang,html:`<div class="t">${esc(item.model)}</div>${tipRow(col,'Tokens',fmt(item.totalTokens))}${tipRow('','Share',Math.round(item.totalTokens/total*100)+'%')}${tipRow('','Sessions',fmt(item.sessions||0))}`});start+=ang});ctx.beginPath();ctx.arc(cx,cy,inner,0,Math.PI*2);ctx.fillStyle=themeColor('--surface');ctx.fill();ctx.textAlign='center';ctx.fillStyle=themeColor('--ink');ctx.font='800 19px Inter,system-ui';ctx.fillText(fmt(total),cx,cy+2);ctx.fillStyle=themeColor('--soft');ctx.font='650 11px Inter,system-ui';ctx.fillText('tokens',cx,cy+19);data.slice(0,4).forEach((item,i)=>{const x=18+(i%2)*(width/2-8),y=172+Math.floor(i/2)*22;ctx.fillStyle=colors[i];ctx.fillRect(x,y-9,10,10);ctx.fillStyle=themeColor('--soft');ctx.textAlign='left';ctx.font='650 12px Inter,system-ui';ctx.fillText(String(item.model).slice(0,22),x+16,y)});bindHover(el,'wedge',hits,{cx,cy,r,inner})}
+function drawTurnChart(prompt){const s=setupCanvas('turnChart',170);if(!s||!prompt)return;const{ctx,width,height,el}=s,data=prompt.turns||[];if(!data.length){ctx.fillStyle=themeColor('--soft');ctx.font='12px '+(cssVar('--font')||'sans-serif');ctx.textAlign='center';ctx.fillText('No per-turn token data for this prompt.',width/2,height/2);if(el){el.onmousemove=null;el.classList.remove('hoverable')}return}const pad={l:46,r:14,t:16,b:26},cw=width-pad.l-pad.r,ch=height-pad.t-pad.b,max=Math.max(...data.map(t=>t.totalTokens),1),C={blue:themeColor('--blue'),green:themeColor('--green'),mauve:themeColor('--mauve'),amber:themeColor('--amber')},hits=[];ctx.font='10px '+(cssVar('--mono')||'monospace');ctx.fillStyle=themeColor('--soft');ctx.textAlign='right';for(let i=0;i<=3;i++){const y=pad.t+ch-(i/3)*ch;ctx.fillText(fmt(max*i/3),pad.l-8,y+3);ctx.strokeStyle=themeColor('--line-3');ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(width-pad.r,y);ctx.stroke()}ctx.beginPath();data.forEach((t,i)=>{const x=pad.l+(data.length===1?cw/2:i*cw/(data.length-1)),y=pad.t+ch-(t.totalTokens/max)*ch;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});ctx.strokeStyle=C.blue;ctx.lineWidth=2;ctx.stroke();data.forEach((t,i)=>{const x=pad.l+(data.length===1?cw/2:i*cw/(data.length-1)),y=pad.t+ch-(t.totalTokens/max)*ch;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fillStyle=t.totalTokens===max?themeColor('--rose'):C.green;ctx.fill();hits.push({x,y,html:`<div class="t">Turn ${i+1} · ${fmt(t.totalTokens)} tokens</div>${timeFmt(t.timestamp)?`<div class="r"><span>${timeFmt(t.timestamp)}</span><b></b></div>`:''}${tipRow(C.blue,'Fresh input',fmt(freshInput(t)))}${tipRow(C.green,'Cached input',fmt(t.cachedInputTokens||0))}${tipRow(C.mauve,'Reasoning',fmt(t.reasoningOutputTokens||0))}${tipRow(C.amber,'Output',fmt(visibleOut(t)))}${t.contextWindow?tipRow('','Context window',fmt(t.contextWindow)):''}`});if(i%Math.ceil(data.length/6)===0||i===data.length-1){ctx.fillStyle=themeColor('--soft');ctx.textAlign='center';ctx.fillText(String(i+1),x,height-8)}});bindHover(el,'point',hits)}
+
+/* ===== share card ===== */
+function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function wrapText(ctx,text,x,y,maxW,lh,maxLines){const words=String(text).split(' ');let line='',lines=0;for(let n=0;n<words.length;n++){const test=line+words[n]+' ';if(ctx.measureText(test).width>maxW&&n>0){ctx.fillText(line.trim(),x,y);line=words[n]+' ';y+=lh;if(++lines>=maxLines-1){ctx.fillText(line.trim()+(n<words.length-1?'…':''),x,y);return}}else line=test}ctx.fillText(line.trim(),x,y)}
+async function openShare(){if(!DATA)return;if(document.fonts&&document.fonts.ready)await document.fonts.ready;const t=DATA.totals,c=document.getElementById('shareCanvas'),ctx=c.getContext('2d'),W=1200,H=630;ctx.clearRect(0,0,W,H);const g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,'#16171c');g.addColorStop(1,'#25272f');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);ctx.strokeStyle='rgba(255,255,255,.03)';for(let x=0;x<W;x+=60){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}for(let y=0;y<H;y+=60){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}const glow=ctx.createRadialGradient(220,110,0,220,110,460);glow.addColorStop(0,'rgba(212,164,74,.16)');glow.addColorStop(1,'transparent');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
+ctx.fillStyle='#d4a44a';roundRect(ctx,60,58,46,46,11);ctx.fill();ctx.fillStyle='#1a1306';ctx.font='800 20px Inter,system-ui';ctx.textAlign='center';ctx.fillText('CX',83,89);ctx.textAlign='left';
+ctx.fillStyle='#e3e2df';ctx.font='800 40px Inter,system-ui';ctx.fillText('My Codex Usage',122,92);
+if(t.dateRange){ctx.fillStyle='#888a92';ctx.font='500 18px Inter,system-ui';ctx.fillText(`${t.dateRange.from} to ${t.dateRange.to}`,122,120);}
+const ins=DATA.insights||[];if(ins.length){ctx.fillStyle='#e3c281';ctx.font='600 21px Inter,system-ui';wrapText(ctx,ins[0].title,60,176,W-120,28,2);}
+const cachePct=t.totalTokens?Math.round(t.cachedInputTokens/t.totalTokens*100):0;
+const cards=[{l:'TOTAL TOKENS',v:fmt(t.totalTokens)},{l:'SESSIONS',v:fmt(t.totalSessions)},{l:'CACHED INPUT',v:cachePct+'%'},{l:'REASONING TOKENS',v:fmt(t.reasoningOutputTokens)}];
+const gy=232,cw=(W-120-40)/2,chH=158;cards.forEach((s,i)=>{const col=i%2,row=Math.floor(i/2),x=60+col*(cw+40),y=gy+row*(chH+20);ctx.fillStyle='rgba(255,255,255,.05)';roundRect(ctx,x,y,cw,chH,16);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=1;roundRect(ctx,x,y,cw,chH,16);ctx.stroke();ctx.fillStyle='#888a92';ctx.font='600 14px Inter,system-ui';ctx.fillText(s.l,x+24,y+38);ctx.fillStyle='#e3e2df';ctx.font='800 46px Inter,system-ui';ctx.fillText(s.v,x+24,y+102);});
+ctx.fillStyle='#888a92';ctx.font='600 16px Inter,system-ui';ctx.fillText('codex-spend',60,H-40);ctx.textAlign='right';ctx.fillStyle='#5d6068';ctx.font='500 15px Inter,system-ui';ctx.fillText('npx codex-spend',W-60,H-40);ctx.textAlign='left';
+document.getElementById('shareOverlay').classList.add('open');}
+function closeShare(){document.getElementById('shareOverlay').classList.remove('open')}
+function downloadShare(){const c=document.getElementById('shareCanvas'),a=document.createElement('a');a.download='codex-spend.png';a.href=c.toDataURL('image/png');a.click()}
+
+async function refresh(){const b=document.querySelector('.btn.primary');if(b)b.textContent='Refreshing…';await fetchData(true)}
+window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeShare();closeDrawer()}});
+window.addEventListener('resize',()=>{if(!DATA||!DATA.sessions.length)return;if(activeTab==='overview'){drawDailyChart();drawModelChart()}if(document.getElementById('drawer').classList.contains('open')){const s=DATA.sessions.find(x=>x.sessionId===selectedSessionId);const p=s?.promptBreakdown.find(x=>x.rank===selectedPromptRank);if(p)drawTurnChart(p)}});
+fetchData().catch(err=>{const app=document.getElementById('app');app.className='wrap';app.innerHTML=`<div class="card empty">${esc(err.message)}</div>`});
+</script>
+</body>
+</html>
