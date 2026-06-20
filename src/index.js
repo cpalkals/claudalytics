@@ -12,21 +12,27 @@ const args = process.argv.slice(2);
 
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`
-codex-spend - See where your Codex tokens go
+agent-spend - See where your coding-agent tokens go
+
+Auto-detects local usage for Codex, Claude Code, Qwen Code and Gemini CLI,
+and lets you switch between them in the dashboard. All data stays local.
 
 Usage:
-  codex-spend [options]
+  agent-spend [options]
 
 Options:
   --port <port>          Port to run dashboard on (default: 3457)
-  --codex-home <path>    Codex home directory (default: CODEX_HOME or ~/.codex)
+  --codex-home <path>    Override Codex home (default: CODEX_HOME or ~/.codex)
   --no-open              Do not auto-open the browser
   --help, -h             Show this help message
 
+Per-agent homes can also be set via env: CODEX_HOME, CLAUDE_HOME,
+QWEN_HOME, GEMINI_HOME.
+
 Examples:
-  codex-spend
-  codex-spend --port 8080
-  codex-spend --codex-home ~/.codex --no-open
+  agent-spend
+  agent-spend --port 8080
+  agent-spend --codex-home ~/.codex --no-open
 `);
   process.exit(0);
 }
@@ -44,7 +50,7 @@ const app = createServer({ codexHome });
 
 const server = app.listen(port, async () => {
   const url = `http://localhost:${port}`;
-  console.log(`\n  codex-spend dashboard running at ${url}\n`);
+  console.log(`\n  agent-spend dashboard running at ${url}\n`);
 
   if (!noOpen) {
     try {

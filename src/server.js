@@ -1,38 +1,50 @@
 const express = require('express');
 const path = require('path');
+const registry = require('./adapters');
 
 function createServer(options = {}) {
   const app = express();
-  let cachedData = null;
+  const cache = {}; // sourceId -> parsed result
 
   function friendlyError(err) {
-    if (err.code === 'ENOENT') {
-      return { error: 'Codex data directory not found. Try --codex-home <path>.', code: err.code };
-    }
-    if (err.code === 'EPERM' || err.code === 'EACCES') {
-      return { error: 'Permission denied reading Codex data.', code: err.code };
-    }
+    if (err.code === 'ENOENT') return { error: 'Agent data directory not found.', code: err.code };
+    if (err.code === 'EPERM' || err.code === 'EACCES') return { error: 'Permission denied reading agent data.', code: err.code };
     return { error: err.message || String(err) };
   }
 
-  async function readData() {
-    return require('./parser').parseAllSessions(options);
+  function resolveSourceId(req) {
+    const requested = req.query.source;
+    if (requested && registry.get(requested)) return requested;
+    return registry.defaultSourceId();
   }
 
+  async function readSource(sourceId) {
+    const adapter = registry.get(sourceId);
+    // Back-compat: a legacy --codex-home still flows to the codex adapter.
+    const opts = sourceId === 'codex' ? { codexHome: options.codexHome } : {};
+    return adapter.parse(opts);
+  }
+
+  // List every known agent and whether its data is present on this machine.
+  app.get('/api/sources', (req, res) => {
+    res.json({ sources: registry.list(), default: registry.defaultSourceId() });
+  });
+
   app.get('/api/data', async (req, res) => {
+    const sourceId = resolveSourceId(req);
     try {
-      if (!cachedData) cachedData = await readData();
-      res.json(cachedData);
+      if (!cache[sourceId]) cache[sourceId] = await readSource(sourceId);
+      res.json(cache[sourceId]);
     } catch (err) {
       res.status(500).json(friendlyError(err));
     }
   });
 
   app.get('/api/refresh', async (req, res) => {
+    const sourceId = resolveSourceId(req);
     try {
-      delete require.cache[require.resolve('./parser')];
-      cachedData = await readData();
-      res.json({ ok: true, sessions: cachedData.sessions.length });
+      cache[sourceId] = await readSource(sourceId);
+      res.json({ ok: true, source: sourceId, sessions: cache[sourceId].sessions.length });
     } catch (err) {
       res.status(500).json(friendlyError(err));
     }

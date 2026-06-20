@@ -1,0 +1,183 @@
+// Claude Code adapter — reads ~/.claude/projects/**/*.jsonl (assistant usage blocks).
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { expandHome, parseJSONLFile } = require('./shared');
+const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
+
+const id = 'claude';
+const label = 'Claude Code';
+const mark = 'CC';
+const accent = '#cc785c';
+const capabilities = { cost: true, reasoning: false, rateLimit: false, cache: true, tools: true, contextWindow: false };
+
+// Anthropic API per-token pricing (estimate; subscription billing differs).
+const MODEL_PRICING = {
+  'opus-4.5': { input: 5 / 1e6, output: 25 / 1e6, cacheWrite: 6.25 / 1e6, cacheRead: 0.50 / 1e6 },
+  'opus-4.6': { input: 5 / 1e6, output: 25 / 1e6, cacheWrite: 6.25 / 1e6, cacheRead: 0.50 / 1e6 },
+  'opus-4.0': { input: 15 / 1e6, output: 75 / 1e6, cacheWrite: 18.75 / 1e6, cacheRead: 1.50 / 1e6 },
+  'opus-4.1': { input: 15 / 1e6, output: 75 / 1e6, cacheWrite: 18.75 / 1e6, cacheRead: 1.50 / 1e6 },
+  sonnet: { input: 3 / 1e6, output: 15 / 1e6, cacheWrite: 3.75 / 1e6, cacheRead: 0.30 / 1e6 },
+  'haiku-4.5': { input: 1 / 1e6, output: 5 / 1e6, cacheWrite: 1.25 / 1e6, cacheRead: 0.10 / 1e6 },
+  'haiku-3.5': { input: 0.80 / 1e6, output: 4 / 1e6, cacheWrite: 1.00 / 1e6, cacheRead: 0.08 / 1e6 },
+};
+const DEFAULT_PRICING = MODEL_PRICING.sonnet;
+function getPricing(model) {
+  if (!model) return DEFAULT_PRICING;
+  const m = model.toLowerCase();
+  if (m.includes('opus')) {
+    if (m.includes('4-6') || m.includes('4.6')) return MODEL_PRICING['opus-4.6'];
+    if (m.includes('4-5') || m.includes('4.5')) return MODEL_PRICING['opus-4.5'];
+    if (m.includes('4-1') || m.includes('4.1')) return MODEL_PRICING['opus-4.1'];
+    return MODEL_PRICING['opus-4.0'];
+  }
+  if (m.includes('sonnet')) return MODEL_PRICING.sonnet;
+  if (m.includes('haiku')) return m.includes('4-5') || m.includes('4.5') ? MODEL_PRICING['haiku-4.5'] : MODEL_PRICING['haiku-3.5'];
+  return DEFAULT_PRICING;
+}
+
+function home(options = {}) {
+  return expandHome(options.home || process.env.CLAUDE_HOME) || path.join(os.homedir(), '.claude');
+}
+function detect(options = {}) {
+  return fs.existsSync(path.join(home(options), 'projects'));
+}
+
+// Pair each user prompt with the assistant usage turns that follow it.
+function extractTurns(entries) {
+  const turns = [];
+  let pendingPrompt = null;
+  for (const entry of entries) {
+    if (entry.type === 'user' && entry.message?.role === 'user') {
+      if (entry.isMeta) continue;
+      const content = entry.message.content;
+      if (typeof content === 'string' && (content.startsWith('<local-command') || content.startsWith('<command-name'))) continue;
+      const text = typeof content === 'string'
+        ? content
+        : (Array.isArray(content) ? content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim() : '');
+      pendingPrompt = text || null;
+    }
+    if (entry.type === 'assistant' && entry.message?.usage) {
+      const u = entry.message.usage;
+      const model = entry.message.model || 'unknown';
+      if (model === '<synthetic>') continue;
+      const pricing = getPricing(model);
+      const inputTokens = u.input_tokens || 0;
+      const cacheCreate = u.cache_creation_input_tokens || 0;
+      const cacheRead = u.cache_read_input_tokens || 0;
+      const outputTokens = u.output_tokens || 0;
+      // Treat all input flavors (fresh + cache write + cache read) as input volume,
+      // and cacheRead as the "cached" slice, to match the dashboard's token model.
+      const totalInput = inputTokens + cacheCreate + cacheRead;
+      const cost = inputTokens * pricing.input + cacheCreate * pricing.cacheWrite + cacheRead * pricing.cacheRead + outputTokens * pricing.output;
+      const tools = [];
+      if (Array.isArray(entry.message.content)) {
+        for (const b of entry.message.content) if (b.type === 'tool_use' && b.name) tools.push(b.name);
+      }
+      turns.push({
+        turnId: entry.uuid || `turn-${turns.length + 1}`,
+        timestamp: entry.timestamp,
+        prompt: pendingPrompt,
+        model,
+        inputTokens: totalInput,
+        cachedInputTokens: cacheRead,
+        outputTokens,
+        reasoningOutputTokens: 0,
+        totalTokens: totalInput + outputTokens,
+        contextWindow: null,
+        cost,
+        tools,
+      });
+    }
+  }
+  return turns;
+}
+
+function modelLabel(model) {
+  if (!model) return 'unknown';
+  const m = model.toLowerCase();
+  if (m.includes('opus')) return 'claude-opus';
+  if (m.includes('sonnet')) return 'claude-sonnet';
+  if (m.includes('haiku')) return 'claude-haiku';
+  return model;
+}
+
+async function parse(options = {}) {
+  const h = home(options);
+  const source = { id, label, mark, accent, home: h };
+  const projectsDir = path.join(h, 'projects');
+  if (!fs.existsSync(projectsDir)) return emptyResult(source, capabilities, [{ type: 'missing-dir', message: `Claude Code data not found at ${projectsDir}` }]);
+
+  // history.jsonl gives a friendlier first-prompt per session.
+  const historyPath = path.join(h, 'history.jsonl');
+  const historyEntries = fs.existsSync(historyPath) ? await parseJSONLFile(historyPath) : [];
+  const sessionFirstPrompt = {};
+  for (const e of historyEntries) {
+    if (e.sessionId && e.display && !sessionFirstPrompt[e.sessionId]) {
+      const d = e.display.trim();
+      if (d.startsWith('/') && d.length < 30) continue;
+      sessionFirstPrompt[e.sessionId] = d;
+    }
+  }
+
+  const warnings = [];
+  const sessions = [];
+  let projectDirs = [];
+  try { projectDirs = fs.readdirSync(projectsDir).filter((d) => { try { return fs.statSync(path.join(projectsDir, d)).isDirectory(); } catch { return false; } }); } catch { /* */ }
+
+  for (const projectDir of projectDirs) {
+    const dir = path.join(projectsDir, projectDir);
+    let files;
+    try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')); } catch { continue; }
+    for (const file of files) {
+      const filePath = path.join(dir, file);
+      const sessionId = path.basename(file, '.jsonl');
+      let entries;
+      try { entries = await parseJSONLFile(filePath); } catch { continue; }
+      if (!entries.length) continue;
+      const rawTurns = extractTurns(entries);
+      if (!rawTurns.length) continue;
+
+      // Normalize project label from the encoded dir name (cwd path with '-' separators).
+      const cwd = entries.find((e) => e.cwd)?.cwd || projectDir.replace(/^-/, '/').replace(/-/g, '/');
+      const project = cwd.split('/').filter(Boolean).slice(-2).join('/') || projectDir;
+
+      const toolCounts = {};
+      const toolEvents = [];
+      for (const t of rawTurns) for (const name of t.tools || []) {
+        toolCounts[name] = (toolCounts[name] || 0) + 1;
+        toolEvents.push({ name, prompt: t.prompt, timestamp: t.timestamp });
+      }
+
+      const firstTs = entries.find((e) => e.timestamp)?.timestamp || null;
+      const lastTs = entries.slice().reverse().find((e) => e.timestamp)?.timestamp || firstTs;
+      const date = firstTs ? firstTs.split('T')[0] : 'unknown';
+      const modelCounts = {};
+      for (const t of rawTurns) modelCounts[t.model] = (modelCounts[t.model] || 0) + 1;
+      const primaryModel = modelLabel(Object.entries(modelCounts).sort((a, b) => b[1] - a[1])[0]?.[0]);
+      const title = sessionFirstPrompt[sessionId] || rawTurns.find((t) => t.prompt)?.prompt || '(no prompt)';
+      const promptBreakdown = buildPromptBreakdown(rawTurns, toolEvents, title);
+
+      sessions.push({
+        sessionId, filePath, archived: false,
+        title: String(title).slice(0, 240), project, cwd, date,
+        timestamp: firstTs, updatedTimestamp: lastTs, model: primaryModel,
+        turnCount: rawTurns.length, agentMessages: rawTurns.length,
+        toolCount: Object.values(toolCounts).reduce((s, n) => s + n, 0), toolCounts,
+        promptCount: promptBreakdown.length, promptBreakdown,
+        turns: rawTurns.map((t) => ({ ...t, model: modelLabel(t.model) })),
+        inputTokens: rawTurns.reduce((s, t) => s + t.inputTokens, 0),
+        cachedInputTokens: rawTurns.reduce((s, t) => s + t.cachedInputTokens, 0),
+        outputTokens: rawTurns.reduce((s, t) => s + t.outputTokens, 0),
+        reasoningOutputTokens: 0,
+        totalTokens: rawTurns.reduce((s, t) => s + t.totalTokens, 0),
+        cost: rawTurns.reduce((s, t) => s + (t.cost || 0), 0),
+        contextWindow: null, peakInputTokens: 0, peakTurnTokens: 0, rateLimit: null,
+      });
+    }
+  }
+  if (!sessions.length) return emptyResult(source, capabilities, [{ type: 'no-sessions', message: 'No Claude Code sessions with usage found.' }]);
+  return buildResult(sessions, source, capabilities, warnings);
+}
+
+module.exports = { id, label, mark, accent, capabilities, home, detect, parse };

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Codex Spend</title>
+<title>Agent Spend</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -66,6 +66,13 @@ h1{margin:0;font-size:18px;line-height:1.1;letter-spacing:-.01em}
 .tab{cursor:pointer;border:0;background:transparent;color:var(--soft);padding:9px 16px;border-radius:8px;font-size:13px;font-weight:700;white-space:nowrap;transition:background-color .14s,color .14s}
 .tab:hover{color:var(--ink)}
 .tab.on{background:var(--brand);color:var(--brand-fg)}
+/* agent switcher */
+.agentbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.agent{display:inline-flex;align-items:center;gap:9px;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--muted);padding:8px 14px 8px 8px;border-radius:11px;font-size:13px;font-weight:700;box-shadow:var(--inset);transition:border-color .14s,color .14s,transform .14s,background-color .14s}
+.agent:hover:not(:disabled){border-color:var(--line-2);color:var(--ink);transform:translateY(-1px)}
+.agent.on{border-color:var(--brand);color:var(--ink);background:color-mix(in srgb,var(--brand) 12%,var(--surface))}
+.agent:disabled{opacity:.5;cursor:not-allowed}
+.agent .amark{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-size:11px;font-weight:850;letter-spacing:.02em;flex:none}
 /* cards & grids */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow),var(--inset)}
 .section{padding:20px}
@@ -181,7 +188,7 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 </style>
 </head>
 <body>
-<div id="app" class="loading">Loading Codex usage&hellip;</div>
+<div id="app" class="loading">Loading agent usage&hellip;</div>
 <div class="scrim" id="scrim" onclick="closeDrawer()"></div>
 <div class="chart-tip" id="chartTip"></div>
 <aside class="drawer" id="drawer" aria-hidden="true"><div id="drawerContent"></div></aside>
@@ -197,11 +204,13 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
   </div>
 </div>
 <script>
-let DATA=null, sort={key:'updatedTimestamp',dir:'desc'}, query='', modelFilter='';
+let DATA=null, SOURCES=[], sourceId=localStorage.getItem('codex-spend-source')||null;
+let sort={key:'updatedTimestamp',dir:'desc'}, query='', modelFilter='';
 let activeTab=localStorage.getItem('codex-spend-tab')||'overview';
 let selectedSessionId=null, selectedPromptRank=null, rlTimer=null;
 let theme=localStorage.getItem('codex-spend-theme')||'dark';
 document.documentElement.dataset.theme=theme;
+const caps=()=>DATA&&DATA.capabilities||{};
 const cssVar=name=>getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const themeColor=cssVar;
 const fmt=n=>{n=Number(n||0);if(n>=1_000_000)return(n/1_000_000).toFixed(1)+'M';if(n>=10_000)return Math.round(n/1000)+'K';if(n>=1000)return(n/1000).toFixed(1)+'K';return n.toLocaleString()};
@@ -212,38 +221,55 @@ const q1=s=>String(s).replace(/'/g,'&#039;');
 const freshInput=o=>Math.max(0,(o.inputTokens||0)-(o.cachedInputTokens||0));
 const visibleOut=o=>Math.max(0,(o.outputTokens||0)-(o.reasoningOutputTokens||0));
 
+async function loadSources(){
+  try{const r=await fetch('/api/sources');const j=await r.json();SOURCES=j.sources||[];
+    const avail=SOURCES.filter(s=>s.available);
+    if(!sourceId||!SOURCES.find(s=>s.id===sourceId&&s.available))sourceId=(avail.find(s=>s.id===j.default)||avail[0]||SOURCES[0]||{id:'codex'}).id;
+  }catch{SOURCES=[]}
+}
+function setSource(id){if(id===sourceId)return;sourceId=id;localStorage.setItem('codex-spend-source',id);selectedSessionId=null;selectedPromptRank=null;query='';modelFilter='';closeDrawer();const app=document.getElementById('app');app.className='loading';app.textContent='Loading '+id+' usage…';fetchData().catch(showErr)}
+function applyAccent(hex){if(!hex)return;const c=hex.replace('#','');const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);const lum=(0.299*r+0.587*g+0.114*b)/255;const fg=lum>0.6?'#1a1306':'#ffffff';const hover=`rgb(${Math.min(255,r+18)},${Math.min(255,g+18)},${Math.min(255,b+18)})`;const root=document.documentElement.style;root.setProperty('--brand',hex);root.setProperty('--brand-hover',hover);root.setProperty('--brand-fg',fg);root.setProperty('--focus',hex)}
+
 async function fetchData(refresh=false){
-  const res=await fetch(refresh?'/api/refresh':'/api/data');
+  const qs='?source='+encodeURIComponent(sourceId);
+  const res=await fetch((refresh?'/api/refresh':'/api/data')+qs);
   if(!res.ok)throw new Error((await res.json()).error||'Failed to load data');
-  if(refresh){DATA=await(await fetch('/api/data')).json()}else DATA=await res.json();
+  if(refresh){DATA=await(await fetch('/api/data'+qs)).json()}else DATA=await res.json();
+  if(DATA.source)applyAccent(DATA.source.accent);
   if(!selectedSessionId&&DATA.sessions[0])selectedSessionId=DATA.sessions[0].sessionId;
   render();
 }
 
 function render(){
-  const t=DATA.totals, app=document.getElementById('app');
+  const t=DATA.totals, app=document.getElementById('app'), src=DATA.source||{}, c=caps();
   app.className='wrap';
-  const cachePct=t.totalTokens?Math.round(t.cachedInputTokens/t.totalTokens*100):0;
-  const reasonPct=t.outputTokens?Math.round(t.reasoningOutputTokens/t.outputTokens*100):0;
   app.innerHTML=`
-<header class="anim"><div class="brand"><div class="mark">CX</div><div><h1>Codex Spend</h1><div class="sub" title="${esc(DATA.codexHome)}">${esc(DATA.codexHome)}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div></header>
+<header class="anim"><div class="brand"><div class="mark">${esc(src.mark||'CX')}</div><div><h1>Agent Spend</h1><div class="sub" title="${esc(src.home||'')}">${esc(src.label||'')} · ${esc(src.home||'')}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div></header>
+${agentBar()}
 ${DATA.warnings?.length?`<div class="warnbox anim">${DATA.warnings.map(w=>esc(w.message)).join('<br>')}</div>`:''}
-${!DATA.sessions.length?'<div class="card empty anim">No Codex sessions found in '+esc(DATA.codexHome)+'.</div>':`
-<div class="summary anim">
-  ${kpi('Total Tokens',fmt(t.totalTokens),`${fmt(t.inputTokens)} in · ${fmt(t.outputTokens)} out`)}
-  ${kpi('Cached Input',fmt(t.cachedInputTokens),`${cachePct}% of all tokens`)}
-  ${kpi('Reasoning',fmt(t.reasoningOutputTokens),`${reasonPct}% of output`)}
-  ${kpi('Sessions',fmt(t.totalSessions),`${fmt(t.totalPrompts)} prompts · ${fmt(t.totalToolCalls)} tools`)}
-</div>
-${ratebar(t.latestRateLimit)}
+${!DATA.sessions.length?`<div class="card empty anim">No ${esc(src.label||'agent')} sessions with token usage found.<div class="muted" style="margin-top:8px">${esc(src.home||'')}</div></div>`:`
+<div class="summary anim">${kpiStrip(t,c)}</div>
+${c.rateLimit?ratebar(t.latestRateLimit):''}
 <div class="tabs anim">
   ${tabBtn('overview','Overview')}${tabBtn('sessions','Sessions')}${tabBtn('prompts','Prompts')}${tabBtn('insights',`Insights · ${DATA.insights.length}`)}
 </div>
 <div id="view" class="view"></div>`}`;
-  if(DATA.sessions.length){renderView();startRlTimer()}
+  if(DATA.sessions.length){renderView();if(c.rateLimit)startRlTimer()}
 }
 
+function agentBar(){if(!SOURCES.length)return'';return`<div class="agentbar anim">${SOURCES.map(s=>`<button class="agent ${s.id===sourceId?'on':''}" ${s.available?'':'disabled'} title="${s.available?esc(s.home):'not detected on this machine'}" onclick="setSource('${s.id}')"><span class="amark" style="background:${s.available?s.accent:'var(--surface-3)'};color:${s.available?accentFg(s.accent):'var(--faint)'}">${esc(s.mark)}</span>${esc(s.label)}${s.available?'':' <span class="muted" style="font-size:10px">·n/a</span>'}</button>`).join('')}</div>`}
+function accentFg(hex){if(!hex)return'#fff';const c=hex.replace('#','');const lum=(0.299*parseInt(c.slice(0,2),16)+0.587*parseInt(c.slice(2,4),16)+0.114*parseInt(c.slice(4,6),16))/255;return lum>0.6?'#1a1306':'#fff'}
+function kpiStrip(t,c){const cachePct=t.totalTokens?Math.round(t.cachedInputTokens/t.totalTokens*100):0;const reasonPct=t.outputTokens?Math.round(t.reasoningOutputTokens/t.outputTokens*100):0;
+  let third;
+  if(c.reasoning)third=kpi('Reasoning',fmt(t.reasoningOutputTokens),`${reasonPct}% of output`);
+  else if(c.cost)third=kpi('Est. Cost',(t.totalCost>=1000?'$'+(t.totalCost/1000).toFixed(1)+'K':'$'+t.totalCost.toFixed(2)),'API-rate estimate');
+  else third=kpi('Output',fmt(t.outputTokens),`${t.totalTokens?Math.round(t.outputTokens/t.totalTokens*100):0}% of tokens`);
+  return kpi('Total Tokens',fmt(t.totalTokens),`${fmt(t.inputTokens)} in · ${fmt(t.outputTokens)} out`)
+    +kpi('Cached Input',fmt(t.cachedInputTokens),`${cachePct}% of all tokens`)
+    +third
+    +kpi('Sessions',fmt(t.totalSessions),`${fmt(t.totalPrompts)} prompts · ${fmt(t.totalToolCalls)} tools`)}
 function kpi(label,value,hint){return`<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="hint">${esc(hint)}</div></div>`}
+function showErr(err){const app=document.getElementById('app');app.className='wrap';app.innerHTML=`<div class="card empty">${esc(err.message||err)}</div>`}
 function tabBtn(id,label){return`<button class="tab ${activeTab===id?'on':''}" onclick="setTab('${id}')">${label}</button>`}
 function setTab(id){activeTab=id;localStorage.setItem('codex-spend-tab',id);document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick').includes("'"+id+"'")));renderView()}
 function toggleTheme(){theme=theme==='dark'?'light':'dark';localStorage.setItem('codex-spend-theme',theme);document.documentElement.dataset.theme=theme;render()}
@@ -270,7 +296,7 @@ function overviewView(){return`
   <section class="card section"><div class="section-head"><h2>By Weekday</h2><span class="muted">avg / session</span></div>${weekdayList()}</section>
   <section class="card section"><div class="section-head"><h2>Tools</h2></div>${barList(DATA.toolBreakdown.slice(0,8),'tool','count',null)}</section>
 </div>`}
-function legend(){return`<span><i class="dot" style="background:var(--blue)"></i>Fresh input</span><span><i class="dot" style="background:var(--green)"></i>Cached input</span><span><i class="dot" style="background:var(--mauve)"></i>Reasoning</span><span><i class="dot" style="background:var(--amber)"></i>Output</span>`}
+function legend(){return`<span><i class="dot" style="background:var(--blue)"></i>Fresh input</span>${caps().cache?'<span><i class="dot" style="background:var(--green)"></i>Cached input</span>':''}${caps().reasoning?'<span><i class="dot" style="background:var(--mauve)"></i>Reasoning</span>':''}<span><i class="dot" style="background:var(--amber)"></i>Output</span>`}
 
 /* ===== SESSIONS ===== */
 function sessionsView(){return`
@@ -322,7 +348,7 @@ document.getElementById('drawerContent').innerHTML=`
 </div>`;
   if(p)requestAnimationFrame(()=>requestAnimationFrame(()=>drawTurnChart(p)))}
 function promptDetail(p){return`<div><div class="section-head"><h2>Prompt #${p.rank}</h2><span class="badge">${esc(p.model)}</span></div><div class="prompt-full">${esc(p.prompt)}</div></div>
-<div class="mini-stats"><div class="mini"><div class="label">Total</div><div class="value">${fmt(p.totalTokens)}</div></div><div class="mini"><div class="label">Fresh In</div><div class="value">${fmt(freshInput(p))}</div></div><div class="mini"><div class="label">Cached</div><div class="value">${fmt(p.cachedInputTokens)}</div></div><div class="mini"><div class="label">Reasoning</div><div class="value">${fmt(p.reasoningOutputTokens)}</div></div><div class="mini"><div class="label">Turns</div><div class="value">${fmt(p.turnCount)}</div></div></div>
+<div class="mini-stats"><div class="mini"><div class="label">Total</div><div class="value">${fmt(p.totalTokens)}</div></div><div class="mini"><div class="label">Fresh In</div><div class="value">${fmt(freshInput(p))}</div></div><div class="mini"><div class="label">Cached</div><div class="value">${fmt(p.cachedInputTokens)}</div></div><div class="mini"><div class="label">${caps().reasoning?'Reasoning':'Output'}</div><div class="value">${fmt(caps().reasoning?p.reasoningOutputTokens:p.outputTokens)}</div></div><div class="mini"><div class="label">Turns</div><div class="value">${fmt(p.turnCount)}</div></div></div>
 <div class="card section" style="padding:14px"><div class="muted" style="font-weight:700;margin-bottom:6px">Token cost per turn</div><canvas id="turnChart" height="170"></canvas></div>
 ${(p.tools||[]).length?`<div>${p.tools.map(t=>`<span class="tool-chip">${esc(t.tool)} · ${fmt(t.count)}</span>`).join('')}</div>`:''}
 <div class="turns">${p.turns.map((t,i)=>`<div class="turn"><div class="rk">${i+1}</div><div><strong style="font-size:12px">${timeFmt(t.timestamp)}</strong><div class="muted">${esc(t.model)}${t.contextWindow?' · ctx '+fmt(t.contextWindow):''}</div><div class="token-strip">${strip(t)}</div></div><div class="num">${fmt(t.totalTokens)}<div class="muted" style="font-weight:600">${fmt(freshInput(t))} fresh · ${fmt(t.cachedInputTokens)} cached · ${fmt(t.outputTokens)} out</div></div></div>`).join('')}</div>`}
@@ -350,12 +376,13 @@ function drawTurnChart(prompt){const s=setupCanvas('turnChart',170);if(!s||!prom
 function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
 function wrapText(ctx,text,x,y,maxW,lh,maxLines){const words=String(text).split(' ');let line='',lines=0;for(let n=0;n<words.length;n++){const test=line+words[n]+' ';if(ctx.measureText(test).width>maxW&&n>0){ctx.fillText(line.trim(),x,y);line=words[n]+' ';y+=lh;if(++lines>=maxLines-1){ctx.fillText(line.trim()+(n<words.length-1?'…':''),x,y);return}}else line=test}ctx.fillText(line.trim(),x,y)}
 async function openShare(){if(!DATA)return;if(document.fonts&&document.fonts.ready)await document.fonts.ready;const t=DATA.totals,c=document.getElementById('shareCanvas'),ctx=c.getContext('2d'),W=1200,H=630;ctx.clearRect(0,0,W,H);const g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,'#16171c');g.addColorStop(1,'#25272f');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);ctx.strokeStyle='rgba(255,255,255,.03)';for(let x=0;x<W;x+=60){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}for(let y=0;y<H;y+=60){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}const glow=ctx.createRadialGradient(220,110,0,220,110,460);glow.addColorStop(0,'rgba(212,164,74,.16)');glow.addColorStop(1,'transparent');ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);
-ctx.fillStyle='#d4a44a';roundRect(ctx,60,58,46,46,11);ctx.fill();ctx.fillStyle='#1a1306';ctx.font='800 20px Inter,system-ui';ctx.textAlign='center';ctx.fillText('CX',83,89);ctx.textAlign='left';
-ctx.fillStyle='#e3e2df';ctx.font='800 40px Inter,system-ui';ctx.fillText('My Codex Usage',122,92);
+const sAccent=(DATA.source&&DATA.source.accent)||'#d4a44a',sMark=(DATA.source&&DATA.source.mark)||'CX';ctx.fillStyle=sAccent;roundRect(ctx,60,58,46,46,11);ctx.fill();ctx.fillStyle=accentFg(sAccent);ctx.font='800 20px Inter,system-ui';ctx.textAlign='center';ctx.fillText(sMark,83,89);ctx.textAlign='left';
+ctx.fillStyle='#e3e2df';ctx.font='800 40px Inter,system-ui';ctx.fillText('My '+((DATA.source&&DATA.source.label)||'Agent')+' Usage',122,92);
 if(t.dateRange){ctx.fillStyle='#888a92';ctx.font='500 18px Inter,system-ui';ctx.fillText(`${t.dateRange.from} to ${t.dateRange.to}`,122,120);}
 const ins=DATA.insights||[];if(ins.length){ctx.fillStyle='#e3c281';ctx.font='600 21px Inter,system-ui';wrapText(ctx,ins[0].title,60,176,W-120,28,2);}
-const cachePct=t.totalTokens?Math.round(t.cachedInputTokens/t.totalTokens*100):0;
-const cards=[{l:'TOTAL TOKENS',v:fmt(t.totalTokens)},{l:'SESSIONS',v:fmt(t.totalSessions)},{l:'CACHED INPUT',v:cachePct+'%'},{l:'REASONING TOKENS',v:fmt(t.reasoningOutputTokens)}];
+const cachePct=t.totalTokens?Math.round(t.cachedInputTokens/t.totalTokens*100):0,C=caps();
+const fourth=C.reasoning?{l:'REASONING TOKENS',v:fmt(t.reasoningOutputTokens)}:C.cost?{l:'EST. COST',v:t.totalCost>=1000?'$'+(t.totalCost/1000).toFixed(1)+'K':'$'+t.totalCost.toFixed(2)}:{l:'OUTPUT TOKENS',v:fmt(t.outputTokens)};
+const cards=[{l:'TOTAL TOKENS',v:fmt(t.totalTokens)},{l:'SESSIONS',v:fmt(t.totalSessions)},{l:'CACHED INPUT',v:cachePct+'%'},fourth];
 const gy=232,cw=(W-120-40)/2,chH=158;cards.forEach((s,i)=>{const col=i%2,row=Math.floor(i/2),x=60+col*(cw+40),y=gy+row*(chH+20);ctx.fillStyle='rgba(255,255,255,.05)';roundRect(ctx,x,y,cw,chH,16);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=1;roundRect(ctx,x,y,cw,chH,16);ctx.stroke();ctx.fillStyle='#888a92';ctx.font='600 14px Inter,system-ui';ctx.fillText(s.l,x+24,y+38);ctx.fillStyle='#e3e2df';ctx.font='800 46px Inter,system-ui';ctx.fillText(s.v,x+24,y+102);});
 ctx.fillStyle='#888a92';ctx.font='600 16px Inter,system-ui';ctx.fillText('codex-spend',60,H-40);ctx.textAlign='right';ctx.fillStyle='#5d6068';ctx.font='500 15px Inter,system-ui';ctx.fillText('npx codex-spend',W-60,H-40);ctx.textAlign='left';
 document.getElementById('shareOverlay').classList.add('open');}
@@ -365,7 +392,7 @@ function downloadShare(){const c=document.getElementById('shareCanvas'),a=docume
 async function refresh(){const b=document.querySelector('.btn.primary');if(b)b.textContent='Refreshing…';await fetchData(true)}
 window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeShare();closeDrawer()}});
 window.addEventListener('resize',()=>{if(!DATA||!DATA.sessions.length)return;if(activeTab==='overview'){drawDailyChart();drawModelChart()}if(document.getElementById('drawer').classList.contains('open')){const s=DATA.sessions.find(x=>x.sessionId===selectedSessionId);const p=s?.promptBreakdown.find(x=>x.rank===selectedPromptRank);if(p)drawTurnChart(p)}});
-fetchData().catch(err=>{const app=document.getElementById('app');app.className='wrap';app.innerHTML=`<div class="card empty">${esc(err.message)}</div>`});
+(async()=>{await loadSources();await fetchData()})().catch(showErr);
 </script>
 </body>
 </html>
