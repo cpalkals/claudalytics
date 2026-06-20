@@ -1,9 +1,17 @@
 # metrascope
 
+[![npm version](https://img.shields.io/npm/v/metrascope.svg)](https://www.npmjs.com/package/metrascope)
+[![license](https://img.shields.io/npm/l/metrascope.svg)](./LICENSE)
+[![node](https://img.shields.io/node/v/metrascope.svg)](https://nodejs.org)
+
 See where your coding-agent tokens go. One local command, no upload.
 
 A unified, local dashboard for **multiple coding agents** — pick an agent in the
 header and see its own usage. Auto-detects whatever you have installed.
+
+```bash
+npx metrascope
+```
 
 | Agent | Reads | Tokens | Reasoning | Cache | Est. cost | Rate limit |
 |---|---|---|---|---|---|---|
