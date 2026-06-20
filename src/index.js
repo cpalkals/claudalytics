@@ -12,13 +12,13 @@ const args = process.argv.slice(2);
 
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`
-agentmeter - See where your coding-agent tokens go
+metrascope - See where your coding-agent tokens go
 
 Auto-detects local usage for Codex, Claude Code, Qwen Code and Gemini CLI,
 and lets you switch between them in the dashboard. All data stays local.
 
 Usage:
-  agentmeter [options]
+  metrascope [options]
 
 Options:
   --port <port>          Port to run dashboard on (default: 3457)
@@ -30,9 +30,9 @@ Per-agent homes can also be set via env: CODEX_HOME, CLAUDE_HOME,
 QWEN_HOME, GEMINI_HOME.
 
 Examples:
-  agentmeter
-  agentmeter --port 8080
-  agentmeter --codex-home ~/.codex --no-open
+  metrascope
+  metrascope --port 8080
+  metrascope --codex-home ~/.codex --no-open
 `);
   process.exit(0);
 }
@@ -50,7 +50,7 @@ const app = createServer({ codexHome });
 
 const server = app.listen(port, async () => {
   const url = `http://localhost:${port}`;
-  console.log(`\n  agentmeter dashboard running at ${url}\n`);
+  console.log(`\n  metrascope dashboard running at ${url}\n`);
 
   if (!noOpen) {
     try {

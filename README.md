@@ -1,4 +1,4 @@
-# agentmeter
+# metrascope
 
 See where your coding-agent tokens go. One local command, no upload.
 
@@ -16,7 +16,7 @@ header and see its own usage. Auto-detects whatever you have installed.
 ## Run
 
 ```bash
-npx @buckibarnes17/agentmeter
+npx metrascope
 ```
 
 That's it — it opens a dashboard in your browser. Or from a clone:
@@ -33,9 +33,9 @@ npm start
 ## Options
 
 ```bash
-agentmeter --port 8080
-agentmeter --no-open
-agentmeter --codex-home ~/.codex
+metrascope --port 8080
+metrascope --no-open
+metrascope --codex-home ~/.codex
 ```
 
 Per-agent homes can be overridden via env: `CODEX_HOME`, `CLAUDE_HOME`,
