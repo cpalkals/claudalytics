@@ -1,6 +1,6 @@
 {
   "name": "metrascope",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "See where your coding-agent tokens go. One local command — Codex, Claude Code, Qwen Code, OpenCode & more. Zero upload.",
   "main": "src/index.js",
   "bin": {
