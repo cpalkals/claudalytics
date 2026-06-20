@@ -10,6 +10,7 @@ header and see its own usage. Auto-detects whatever you have installed.
 | **Codex** | `~/.codex` sessions | ✓ | ✓ | ✓ | — | ✓ |
 | **Claude Code** | `~/.claude/projects` | ✓ | — | ✓ | ✓ | — |
 | **Qwen Code** | `~/.qwen/projects/**/chats` | ✓ | ✓ | ✓ | — | — |
+| **OpenCode** | `~/.local/share/opencode/opencode.db` (SQLite) | ✓ | ✓ | ✓ | ✓ | — |
 | **Gemini CLI** | `~/.gemini` | detected (no per-turn token data) | — | — | — | — |
 
 ## Run

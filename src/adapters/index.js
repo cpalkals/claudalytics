@@ -3,9 +3,10 @@
 const codex = require('./codex');
 const claude = require('./claude');
 const qwen = require('./qwen');
+const opencode = require('./opencode');
 const gemini = require('./gemini');
 
-const ADAPTERS = [codex, claude, qwen, gemini];
+const ADAPTERS = [codex, claude, qwen, opencode, gemini];
 
 function list() {
   return ADAPTERS.map((a) => ({
