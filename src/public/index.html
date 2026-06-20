@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agent Spend</title>
+<title>Metrascope</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -188,7 +188,7 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 </style>
 </head>
 <body>
-<div id="app" class="loading">Loading agent usage&hellip;</div>
+<div id="app" class="loading">Loading Metrascope&hellip;</div>
 <div class="scrim" id="scrim" onclick="closeDrawer()"></div>
 <div class="chart-tip" id="chartTip"></div>
 <aside class="drawer" id="drawer" aria-hidden="true"><div id="drawerContent"></div></aside>
@@ -244,17 +244,17 @@ function render(){
   const t=DATA.totals, app=document.getElementById('app'), src=DATA.source||{}, c=caps();
   app.className='wrap';
   app.innerHTML=`
-<header class="anim"><div class="brand"><div class="mark">${esc(src.mark||'CX')}</div><div><h1>Agent Spend</h1><div class="sub" title="${esc(src.home||'')}">${esc(src.label||'')} · ${esc(src.home||'')}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div></header>
+<header class="anim"><div class="brand"><div class="mark">${esc(src.mark||'CX')}</div><div><h1>Metrascope</h1><div class="sub" title="${esc(src.home||'')}">${esc(src.label||'')} · ${esc(src.home||'')}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div></header>
 ${agentBar()}
 ${DATA.warnings?.length?`<div class="warnbox anim">${DATA.warnings.map(w=>esc(w.message)).join('<br>')}</div>`:''}
 ${!DATA.sessions.length?`<div class="card empty anim">No ${esc(src.label||'agent')} sessions with token usage found.<div class="muted" style="margin-top:8px">${esc(src.home||'')}</div></div>`:`
 <div class="summary anim">${kpiStrip(t,c)}</div>
-${c.rateLimit?ratebar(t.latestRateLimit):''}
+${usageBand(t,c)}
 <div class="tabs anim">
   ${tabBtn('overview','Overview')}${tabBtn('sessions','Sessions')}${tabBtn('prompts','Prompts')}${tabBtn('insights',`Insights · ${DATA.insights.length}`)}
 </div>
 <div id="view" class="view"></div>`}`;
-  if(DATA.sessions.length){renderView();if(c.rateLimit)startRlTimer()}
+  if(DATA.sessions.length){renderView();startRlTimer()}
 }
 
 function agentBar(){if(!SOURCES.length)return'';return`<div class="agentbar anim">${SOURCES.map(s=>`<button class="agent ${s.id===sourceId?'on':''}" ${s.available?'':'disabled'} title="${s.available?esc(s.home):'not detected on this machine'}" onclick="setSource('${s.id}')"><span class="amark" style="background:${s.available?s.accent:'var(--surface-3)'};color:${s.available?accentFg(s.accent):'var(--faint)'}">${esc(s.mark)}</span>${esc(s.label)}${s.available?'':' <span class="muted" style="font-size:10px">·n/a</span>'}</button>`).join('')}</div>`}
@@ -353,13 +353,19 @@ function promptDetail(p){return`<div><div class="section-head"><h2>Prompt #${p.r
 ${(p.tools||[]).length?`<div>${p.tools.map(t=>`<span class="tool-chip">${esc(t.tool)} · ${fmt(t.count)}</span>`).join('')}</div>`:''}
 <div class="turns">${p.turns.map((t,i)=>`<div class="turn"><div class="rk">${i+1}</div><div><strong style="font-size:12px">${timeFmt(t.timestamp)}</strong><div class="muted">${esc(t.model)}${t.contextWindow?' · ctx '+fmt(t.contextWindow):''}</div><div class="token-strip">${strip(t)}</div></div><div class="num">${fmt(t.totalTokens)}<div class="muted" style="font-weight:600">${fmt(freshInput(t))} fresh · ${fmt(t.cachedInputTokens)} cached · ${fmt(t.outputTokens)} out</div></div></div>`).join('')}</div>`}
 
-/* ===== rate-limit bar ===== */
+/* ===== usage / rate-limit bar ===== */
 function windowLabel(min){if(!min)return'window';if(min%1440===0)return(min/1440)+'-day';if(min%60===0)return(min/60)+'-hour';return min+'-min'}
-function resetText(unixSec){if(!unixSec)return'';const ms=unixSec*1000-Date.now();if(ms<=0)return'resetting now';const m=Math.floor(ms/60000),h=Math.floor(m/60),d=Math.floor(h/24);if(d>=1)return`resets in ${d}d ${h%24}h`;if(h>=1)return`resets in ${h}h ${m%60}m`;return`resets in ${m}m`}
+function relShort(ms){const m=Math.floor(ms/60000),h=Math.floor(m/60),d=Math.floor(h/24);if(d>=1)return`${d}d ${h%24}h`;if(h>=1)return`${h}h ${m%60}m`;return`${m}m`}
+function fmtAbs(unixSec){return new Date(unixSec*1000).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}
+// mode: 'reset' (official limit window) | 'free' (rolling-usage window ages out)
+function resetLine(unixSec,mode){if(!unixSec)return mode==='free'?'no recent activity':'no reset recorded';const ms=unixSec*1000-Date.now();const abs=fmtAbs(unixSec);const past=ms<=0;const verb=mode==='free'?(past?'freed up':'frees up'):(past?'reset':'resets');return past?`${verb} ${abs}`:`${verb} ${abs} · in ${relShort(ms)}`}
 function rlColor(pct){if(pct==null)return'var(--blue)';if(pct>=80)return'var(--rose)';if(pct>=50)return'var(--amber)';return'var(--green)'}
-function rlSeg(k,win,pct,reset){const p=pct==null?0:pct;return`<div class="rl"><div class="rl-top"><span class="k">${k} · ${windowLabel(win)}</span><span class="v" style="color:${rlColor(pct)}">${pct==null?'n/a':pct+'%'}</span></div><div class="rl-track"><div class="rl-fill" style="width:${Math.min(100,p)}%;background:${rlColor(pct)}"></div></div><div class="rl-reset" data-reset="${reset||''}">${reset?resetText(reset):'no reset recorded'}</div></div>`}
+function rlSeg(k,win,pct,reset){const p=pct==null?0:pct;return`<div class="rl"><div class="rl-top"><span class="k">${k} · ${windowLabel(win)}</span><span class="v" style="color:${rlColor(pct)}">${pct==null?'n/a':pct+'%'}</span></div><div class="rl-track"><div class="rl-fill" style="width:${Math.min(100,p)}%;background:${rlColor(pct)}"></div></div><div class="rl-reset" data-reset="${reset||''}" data-mode="reset">${resetLine(reset,'reset')}</div></div>`}
 function ratebar(r){if(!r)return'';return`<div class="ratebar anim"><div class="plan"><span class="muted" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Plan</span><span class="name">${esc(r.planType||'unknown')}</span>${r.reachedType?`<span class="badge" style="background:var(--rose-bg);border-color:var(--rose-border);color:var(--rose)">limit hit</span>`:''}</div>${rlSeg('Primary',r.primaryWindowMinutes,r.primaryUsedPercent,r.primaryResetsAt)}${rlSeg('Weekly',r.secondaryWindowMinutes,r.secondaryUsedPercent,r.secondaryResetsAt)}</div>`}
-function startRlTimer(){if(rlTimer)clearInterval(rlTimer);rlTimer=setInterval(()=>{document.querySelectorAll('.rl-reset[data-reset]').forEach(el=>{const v=el.getAttribute('data-reset');if(v)el.textContent=resetText(Number(v))})},30000)}
+// Only show the bar when the agent actually reports official rate-limit data
+// (Codex). Agents without it (Claude / Qwen / OpenCode) get no bar.
+function usageBand(t,c){return c.rateLimit&&t.latestRateLimit?ratebar(t.latestRateLimit):''}
+function startRlTimer(){if(rlTimer)clearInterval(rlTimer);rlTimer=setInterval(()=>{document.querySelectorAll('.rl-reset[data-reset]').forEach(el=>{const v=el.getAttribute('data-reset');const mode=el.getAttribute('data-mode')||'reset';if(v)el.textContent=resetLine(Number(v),mode)})},30000)}
 
 /* ===== charts ===== */
 function setupCanvas(id,h){const c=document.getElementById(id);if(!c)return null;const ctx=c.getContext('2d'),dpr=Math.min(window.devicePixelRatio||1,2);let w=c.clientWidth||(c.parentElement&&c.parentElement.clientWidth)||600;w=Math.max(120,Math.min(w,2400));h=h||c.height||210;c.width=Math.round(w*dpr);c.height=Math.round(h*dpr);c.style.height=h+'px';ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);return{ctx,width:w,height:h,el:c}}
