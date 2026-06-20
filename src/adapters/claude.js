@@ -9,7 +9,31 @@ const id = 'claude';
 const label = 'Claude Code';
 const mark = 'CC';
 const accent = '#cc785c';
-const capabilities = { cost: true, reasoning: false, rateLimit: false, cache: true, tools: true, contextWindow: false };
+const capabilities = { cost: true, reasoning: false, rateLimit: false, cache: true, tools: true, contextWindow: false, limitEvents: true };
+
+// Claude Code logs a synthetic 429 assistant message when you hit a usage limit,
+// e.g. "You've hit your session limit · resets 4:20pm (Asia/Kolkata)".
+const LIMIT_RX = /hit your (?:(\w+) )?limit\s*[·.]?\s*resets\s+([0-9]{1,2}:[0-9]{2}\s*[ap]m)\s*\(([^)]+)\)/i;
+function limitHitFromEntry(entry) {
+  if (entry.apiErrorStatus !== 429 && entry.error !== 'rate_limit') return null;
+  const content = entry.message && entry.message.content;
+  const text = Array.isArray(content) ? content.map((b) => b.text || '').join(' ') : (typeof content === 'string' ? content : '');
+  const m = text.match(LIMIT_RX);
+  if (!m) return null;
+  return {
+    timestamp: entry.timestamp || null,
+    kind: /session/i.test(m[1] || '') ? 'session' : 'weekly',
+    reset: m[2].replace(/\s+/g, ''),
+    tz: m[3],
+  };
+}
+function summarizeLimitHits(hits) {
+  const pick = (kind) => {
+    const list = hits.filter((h) => h.kind === kind).sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+    return { count: list.length, last: list[0] || null };
+  };
+  return { total: hits.length, session: pick('session'), weekly: pick('weekly') };
+}
 
 // Anthropic API per-token pricing (estimate; subscription billing differs).
 const MODEL_PRICING = {
@@ -122,6 +146,7 @@ async function parse(options = {}) {
 
   const warnings = [];
   const sessions = [];
+  const limitHits = [];
   let projectDirs = [];
   try { projectDirs = fs.readdirSync(projectsDir).filter((d) => { try { return fs.statSync(path.join(projectsDir, d)).isDirectory(); } catch { return false; } }); } catch { /* */ }
 
@@ -135,6 +160,7 @@ async function parse(options = {}) {
       let entries;
       try { entries = await parseJSONLFile(filePath); } catch { continue; }
       if (!entries.length) continue;
+      for (const e of entries) { const hit = limitHitFromEntry(e); if (hit) limitHits.push(hit); }
       const rawTurns = extractTurns(entries);
       if (!rawTurns.length) continue;
 
@@ -177,7 +203,9 @@ async function parse(options = {}) {
     }
   }
   if (!sessions.length) return emptyResult(source, capabilities, [{ type: 'no-sessions', message: 'No Claude Code sessions with usage found.' }]);
-  return buildResult(sessions, source, capabilities, warnings);
+  const result = buildResult(sessions, source, capabilities, warnings);
+  result.limitEvents = summarizeLimitHits(limitHits);
+  return result;
 }
 
 module.exports = { id, label, mark, accent, capabilities, home, detect, parse };
