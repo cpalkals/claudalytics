@@ -1,25 +1,46 @@
 {
-  "name": "codex-spend",
+  "name": "agent-spend",
   "version": "0.1.0",
-  "description": "See where your Codex tokens go. Local dashboard, zero upload.",
+  "description": "See where your coding-agent tokens go. One local command — Codex, Claude Code, Qwen Code, OpenCode & more. Zero upload.",
   "main": "src/index.js",
   "bin": {
-    "codex-spend": "src/index.js"
+    "agent-spend": "src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/server.js && node --check src/parser.js"
+    "check": "node --check src/index.js && node --check src/server.js && node -e \"require('./src/adapters')\""
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
   },
   "keywords": [
     "codex",
-    "openai",
+    "claude-code",
+    "qwen-code",
+    "opencode",
     "tokens",
     "usage",
     "analytics",
-    "dashboard"
+    "dashboard",
+    "ai-agent",
+    "llm",
+    "cost"
   ],
-  "author": "",
+  "author": "Keshav <crownbalaji27@gmail.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Buckibarnes17/codex-spend.git"
+  },
+  "homepage": "https://github.com/Buckibarnes17/codex-spend#readme",
+  "bugs": {
+    "url": "https://github.com/Buckibarnes17/codex-spend/issues"
+  },
   "dependencies": {
     "express": "^4.21.0",
     "open": "^10.1.0"

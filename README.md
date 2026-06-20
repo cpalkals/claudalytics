@@ -16,16 +16,19 @@ header and see its own usage. Auto-detects whatever you have installed.
 ## Run
 
 ```bash
+npx agent-spend
+```
+
+That's it — it opens a dashboard in your browser. Or from a clone:
+
+```bash
 npm install
 npm start
 ```
 
-Or after linking locally:
-
-```bash
-npm link
-agent-spend
-```
+> The OpenCode adapter reads a SQLite store via Node's built-in `node:sqlite`,
+> which needs **Node 22.5+**. Everything else works on Node 18+. OpenCode is
+> loaded lazily, so older Node still runs fine for the other agents.
 
 ## Options
 
