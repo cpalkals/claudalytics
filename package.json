@@ -1,10 +1,13 @@
 {
-  "name": "coder-agentmeter",
+  "name": "@buckibarnes17/agentmeter",
   "version": "0.1.0",
   "description": "See where your coding-agent tokens go. One local command — Codex, Claude Code, Qwen Code, OpenCode & more. Zero upload.",
   "main": "src/index.js",
   "bin": {
-    "coder-agentmeter": "src/index.js"
+    "agentmeter": "src/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "start": "node src/index.js",
