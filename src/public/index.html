@@ -39,6 +39,7 @@ button,input{font:inherit}
 header{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:22px}
 .brand{display:flex;align-items:center;gap:12px}
 .mark{width:36px;height:36px;border-radius:9px;color:var(--brand-fg);background:linear-gradient(160deg,var(--brand),var(--brand-hover));display:grid;place-items:center;font-weight:850;font-size:14px;letter-spacing:.02em;box-shadow:var(--edge)}
+.logo{width:38px;height:38px;display:block;flex:0 0 auto}
 h1{margin:0;font-size:18px;line-height:1.1;letter-spacing:-.01em}
 .sub{margin-top:3px;color:var(--soft);font-size:11px;font-family:var(--mono);max-width:44ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
@@ -246,7 +247,7 @@ function render(){
   const t=DATA.totals, app=document.getElementById('app'), src=DATA.source||{}, c=caps();
   app.className='wrap';
   app.innerHTML=`
-<header class="anim"><div class="brand"><div class="mark">${esc(src.mark||'CX')}</div><div><h1>Metrascope</h1><div class="sub" title="${esc(src.home||'')}">${esc(src.label||'')} · ${esc(src.home||'')}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div></header>
+<header class="anim"><div class="brand"><img class="logo" src="/favicon.svg" alt="Metrascope" width="38" height="38"><div><h1>Metrascope</h1><div class="sub" title="${esc(src.home||'')}">${esc(src.label||'')} · ${esc(src.home||'')}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div></header>
 ${agentBar()}
 ${DATA.warnings?.length?`<div class="warnbox anim">${DATA.warnings.map(w=>esc(w.message)).join('<br>')}</div>`:''}
 ${!DATA.sessions.length?`<div class="card empty anim">No ${esc(src.label||'agent')} sessions with token usage found.<div class="muted" style="margin-top:8px">${esc(src.home||'')}</div></div>`:`
