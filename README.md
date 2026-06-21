@@ -1,4 +1,8 @@
-# metrascope
+<p align="center">
+  <img src="assets/logo.svg" width="120" height="120" alt="Metrascope logo">
+</p>
+
+<h1 align="center">metrascope</h1>
 
 [![npm version](https://img.shields.io/npm/v/metrascope.svg)](https://www.npmjs.com/package/metrascope)
 [![license](https://img.shields.io/npm/l/metrascope.svg)](./LICENSE)

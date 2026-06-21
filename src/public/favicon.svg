@@ -1,0 +1,9 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Metrascope">
+  <!-- dark bars -->
+  <rect x="255" y="615" width="85" height="210" rx="16" fill="#2f333a"/>
+  <rect x="405" y="485" width="85" height="340" rx="16" fill="#2f333a"/>
+  <rect x="710" y="565" width="85" height="260" rx="16" fill="#2f333a"/>
+  <!-- gold "i" bar + dot (the highlighted metric) -->
+  <rect x="560" y="310" width="85" height="515" rx="16" fill="#d4a44a"/>
+  <circle cx="602" cy="205" r="48" fill="#d4a44a"/>
+</svg>
