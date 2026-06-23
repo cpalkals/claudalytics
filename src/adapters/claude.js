@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { expandHome, parseJSONLFile, clip } = require('./shared');
+const { getPromptTemplate } = require('./claude-prompt');
 const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
 
 const id = 'claude';
@@ -257,7 +258,14 @@ async function content(session, options = {}) {
     items.push({ turnId: msgId, timestamp: e.timestamp || null, output, tools });
   }
   for (const it of items) it.output = clip(it.output);
-  return { items };
+  // Best-effort, offline system-prompt *template* from the local binary. Never
+  // let this break the content endpoint.
+  let promptTemplate = null;
+  try {
+    const version = entries.find((e) => e.version)?.version || null;
+    promptTemplate = await getPromptTemplate(version);
+  } catch { promptTemplate = null; }
+  return { items, promptTemplate };
 }
 
 module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content };
