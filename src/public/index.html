@@ -202,6 +202,11 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 .cnt-prior .rk{width:20px;height:20px;border-radius:6px;background:var(--surface-3);color:var(--soft);font-weight:700;display:grid;place-items:center;font-size:10px;font-family:var(--mono)}
 .cnt-prior-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 .cnt-load{font-size:11px;color:var(--soft);padding:4px 0}
+.cnt-rt{border-top:1px solid var(--line-3);padding:8px 0}
+.cnt-rt-q{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:9px;align-items:center;font-size:11.5px}
+.cnt-rt-q .rk{width:20px;height:20px;border-radius:6px;background:var(--surface-3);color:var(--soft);font-weight:700;display:grid;place-items:center;font-size:10px;font-family:var(--mono)}
+.cnt-rt-q .cnt-prior-t{font-weight:650;color:var(--ink)}
+.cnt-rt-a{margin-top:6px;margin-left:29px;font-size:11.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:var(--muted);max-height:170px;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:7px 10px}
 /* share overlay */
 .overlay{position:fixed;inset:0;background:var(--overlay);backdrop-filter:blur(4px);z-index:60;display:none;align-items:center;justify-content:center;padding:20px}
 .overlay.open{display:flex}
@@ -361,15 +366,21 @@ function strip(o){const total=Math.max(o.totalTokens||((o.inputTokens||0)+(o.out
 function toggleTurn(el){el.classList.toggle('open');if(el.classList.contains('open')){const box=el.querySelector('.turn-content');if(box)loadTurnContent(box)}}
 const contentCache={};
 async function fetchSessionContent(sid){if(contentCache[sid])return contentCache[sid];const p=fetch('/api/content?source='+encodeURIComponent(sourceId)+'&session='+encodeURIComponent(sid)).then(r=>r.json()).catch(()=>({items:[],supported:false}));contentCache[sid]=p;return p}
-async function loadTurnContent(box){if(box.dataset.loaded)return;box.dataset.loaded='1';const sid=selectedSessionId;box.innerHTML='<div class="cnt-load">Loading content…</div>';const data=await fetchSessionContent(sid);if(sid!==selectedSessionId)return;const items=data.items||[];const session=DATA.sessions.find(s=>s.sessionId===sid);const p=session&&(session.promptBreakdown.find(x=>x.rank===selectedPromptRank)||session.promptBreakdown[0]);const turn=p?p.turns[+box.dataset.idx]:null;const tid=box.dataset.turn,ts=box.dataset.time;let it=tid?items.find(x=>x.turnId===tid):null;if(!it&&ts)it=items.find(x=>x.timestamp===ts);if(!it&&ts&&items.length)it=items.map(x=>({x,d:x.timestamp?Math.abs(new Date(x.timestamp)-new Date(ts)):Infinity})).sort((a,b)=>a.d-b.d)[0].x;box.innerHTML=renderContent(it,p,turn,data.supported!==false)}
-function renderContent(it,p,turn,supported){const promptText=p&&p.prompt;let h='';
+async function loadTurnContent(box){if(box.dataset.loaded)return;box.dataset.loaded='1';const sid=selectedSessionId;box.innerHTML='<div class="cnt-load">Loading content…</div>';const data=await fetchSessionContent(sid);if(sid!==selectedSessionId)return;const items=data.items||[];const session=DATA.sessions.find(s=>s.sessionId===sid);const p=session&&(session.promptBreakdown.find(x=>x.rank===selectedPromptRank)||session.promptBreakdown[0]);const turn=p?p.turns[+box.dataset.idx]:null;const tid=box.dataset.turn,ts=box.dataset.time;let it=tid?items.find(x=>x.turnId===tid):null;if(!it&&ts)it=items.find(x=>x.timestamp===ts);if(!it&&ts&&items.length)it=items.map(x=>({x,d:x.timestamp?Math.abs(new Date(x.timestamp)-new Date(ts)):Infinity})).sort((a,b)=>a.d-b.d)[0].x;box.innerHTML=renderContent(it,p,turn,data.supported!==false,items)}
+function renderContent(it,p,turn,supported,items){const promptText=p&&p.prompt;let h='';
   h+=`<div><div class="cnt-h"><i class="dot" style="background:var(--blue)"></i>Prompt (given)</div><div class="cnt-text">${promptText?esc(promptText):'<span class="muted">(continuation — no new user prompt)</span>'}</div></div>`;
   const out=it&&it.output;
   h+=`<div><div class="cnt-h"><i class="dot" style="background:var(--amber)"></i>Output (given out)</div><div class="cnt-text">${out?esc(out):`<span class="muted">${supported?(it?'No assistant text recorded for this turn.':'Could not match a response to this turn.'):"Content view isn't available for this provider."}</span>`}</div></div>`;
   const tools=(it&&it.tools)||[];
   if(tools.length)h+=`<div><div class="cnt-h">Tool calls (${tools.length})</div>${tools.map(t=>`<div class="cnt-tool"><div class="cnt-tool-h">${esc(t.name)}</div>${t.input?`<div class="cnt-sub">input</div><pre class="cnt-pre">${esc(t.input)}</pre>`:''}${t.result?`<div class="cnt-sub">result</div><pre class="cnt-pre">${esc(t.result)}</pre>`:''}</div>`).join('')}</div>`;
   if(caps().cache&&turn&&(turn.cachedInputTokens||0)>0){const session=DATA.sessions.find(s=>s.sessionId===selectedSessionId);const prior=session?session.promptBreakdown.filter(x=>x.rank<selectedPromptRank):[];
-    h+=`<div><div class="cnt-h"><i class="dot" style="background:var(--green)"></i>Cached context · ${fmt(turn.cachedInputTokens)} tokens reused</div><div class="cnt-note">Caching keeps no separate text — these are the reused prefix tokens (system prompt + earlier turns) sent again at a fraction of the price, not new content.</div>${prior.length?`<details class="cnt-det"><summary>${prior.length} earlier prompt${prior.length===1?'':'s'} carried forward as context</summary>${prior.map(pp=>`<div class="cnt-prior"><span class="rk">${pp.rank}</span><span class="cnt-prior-t" title="${esc(pp.prompt)}">${esc(pp.prompt)}</span><span class="muted">${fmt(pp.totalTokens)}</span></div>`).join('')}</details>`:''}</div>`;}
+    const om={};for(const x of (items||[]))if(x.turnId)om[x.turnId]=x;
+    h+=`<div><div class="cnt-h"><i class="dot" style="background:var(--green)"></i>Cached context · ${fmt(turn.cachedInputTokens)} tokens reused</div><div class="cnt-note">This is the conversation prefix re-sent from cache for this turn — the earlier turns below, billed at a fraction of fresh tokens. (The system prompt is also part of the prefix but isn't recorded in the logs.)</div>`;
+    if(prior.length){h+=`<details class="cnt-det"><summary>Show ${prior.length} earlier turn${prior.length===1?'':'s'} reused as context</summary>`;
+      for(const pp of prior){const outs=pp.turns.map(tt=>om[tt.turnId]&&om[tt.turnId].output).filter(Boolean).join('\n\n');
+        h+=`<div class="cnt-rt"><div class="cnt-rt-q"><span class="rk">${pp.rank}</span><span class="cnt-prior-t" title="${esc(pp.prompt)}">${esc(pp.prompt)}</span><span class="muted">${fmt(pp.totalTokens)}</span></div>${outs?`<div class="cnt-rt-a">${esc(outs)}</div>`:''}</div>`;}
+      h+=`</details>`;}
+    h+=`</div>`;}
   return h}
 function turnDetail(t,i){const C=caps();const total=Math.max(t.totalTokens||((t.inputTokens||0)+(t.outputTokens||0)),1);const fresh=freshInput(t),cached=t.cachedInputTokens||0,reason=t.reasoningOutputTokens||0,out=visibleOut(t),input=(t.inputTokens||0);
   const row=(color,label,val,sub)=>`<div class="bd-row${sub?' sub':''}"><span class="bd-k">${color?`<i class="dot" style="background:${color}"></i>`:'<i class="dot" style="background:transparent"></i>'}${label}</span><span class="bd-v">${fmt(val)}</span><span class="bd-p">${Math.round(val/total*100)}%</span></div>`;
