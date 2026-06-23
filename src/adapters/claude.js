@@ -88,12 +88,16 @@ function extractTurns(entries) {
       const model = entry.message.model || 'unknown';
       if (model === '<synthetic>') continue;
       const tools = [];
+      let hasText = false;
       if (Array.isArray(entry.message.content)) {
-        for (const b of entry.message.content) if (b.type === 'tool_use' && b.name) tools.push(b.name);
+        for (const b of entry.message.content) {
+          if (b.type === 'tool_use' && b.name) tools.push(b.name);
+          else if (b.type === 'text' && b.text && b.text.trim()) hasText = true;
+        }
       }
       const msgId = entry.message.id || entry.uuid || `turn-${turns.length + 1}`;
-      // Another content block of a response we already counted — merge tools only.
-      if (byId.has(msgId)) { for (const name of tools) turns[byId.get(msgId)].tools.push(name); continue; }
+      // Another content block of a response we already counted — merge tools/text flag.
+      if (byId.has(msgId)) { const prev = turns[byId.get(msgId)]; for (const name of tools) prev.tools.push(name); if (hasText) prev.hasText = true; continue; }
       const u = entry.message.usage;
       const pricing = getPricing(model);
       const inputTokens = u.input_tokens || 0;
@@ -118,6 +122,7 @@ function extractTurns(entries) {
         contextWindow: null,
         cost,
         tools,
+        hasText,
       });
     }
   }

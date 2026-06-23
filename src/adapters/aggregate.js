@@ -61,6 +61,7 @@ function buildPromptBreakdown(turns, toolEvents, fallbackTitle) {
       turnId: turn.turnId, timestamp: turn.timestamp, model: turn.model,
       inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens, outputTokens: turn.outputTokens,
       reasoningOutputTokens: turn.reasoningOutputTokens, totalTokens: turn.totalTokens, contextWindow: turn.contextWindow,
+      tools: turn.tools, hasText: turn.hasText,
     });
   }
   flush();
