@@ -476,7 +476,8 @@ function downloadShare(){const c=document.getElementById('shareCanvas'),a=docume
 async function refresh(){const b=document.querySelector('.btn.primary');if(b)b.textContent='Refreshing…';await fetchData(true)}
 window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeShare();closeDrawer()}});
 window.addEventListener('resize',()=>{if(!DATA||!DATA.sessions.length)return;if(activeTab==='overview'){drawDailyChart();drawModelChart()}if(document.getElementById('drawer').classList.contains('open')){const s=DATA.sessions.find(x=>x.sessionId===selectedSessionId);const p=s?.promptBreakdown.find(x=>x.rank===selectedPromptRank);if(p)drawTurnChart(p)}});
-(async()=>{await loadSources();await fetchData()})().catch(showErr);
+window.addEventListener('error',(e)=>console.error('[metrascope] runtime error:',e.message,'@',e.filename+':'+e.lineno));
+(async()=>{await loadSources();await fetchData();console.log('%c[metrascope] UI loaded — build with pbox prompt panels','color:#d4a44a;font-weight:bold')})().catch((e)=>{console.error('[metrascope] boot failed:',e);showErr(e)});
 </script>
 </body>
 </html>
