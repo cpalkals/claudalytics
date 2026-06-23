@@ -50,6 +50,24 @@ function createServer(options = {}) {
     }
   });
 
+  // Per-turn message content (prompt/output/tools), read on demand for one session.
+  app.get('/api/content', async (req, res) => {
+    const sourceId = resolveSourceId(req);
+    const sessionId = req.query.session;
+    try {
+      if (!cache[sourceId]) cache[sourceId] = await readSource(sourceId);
+      const session = (cache[sourceId].sessions || []).find((s) => s.sessionId === sessionId);
+      if (!session) return res.status(404).json({ error: 'Session not found.' });
+      const adapter = registry.get(sourceId);
+      if (typeof adapter.content !== 'function') return res.json({ supported: false, items: [] });
+      const opts = sourceId === 'codex' ? { codexHome: options.codexHome } : {};
+      const data = await adapter.content(session, opts);
+      res.json({ supported: data.supported !== false, items: data.items || [] });
+    } catch (err) {
+      res.status(500).json(friendlyError(err));
+    }
+  });
+
   app.use(express.static(path.join(__dirname, 'public')));
   return app;
 }

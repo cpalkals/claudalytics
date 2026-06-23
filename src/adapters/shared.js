@@ -76,6 +76,16 @@ function sum(items, key) {
   return items.reduce((total, item) => total + (item[key] || 0), 0);
 }
 
+// Trim a possibly-huge text blob so the content view stays light over the wire.
+function clip(value, max = 8000) {
+  const s = value == null ? '' : String(value);
+  return s.length > max ? s.slice(0, max) + `\n…[truncated, ${s.length - max} more chars]` : s;
+}
+
+function safeParse(json) {
+  try { return typeof json === 'string' ? JSON.parse(json) : (json || {}); } catch { return {}; }
+}
+
 function fmt(n) {
   n = Number(n || 0);
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
@@ -84,4 +94,4 @@ function fmt(n) {
   return n.toLocaleString();
 }
 
-module.exports = { expandHome, parseJSONLFile, readJSONLMap, walkJSONL, textFromContent, projectFromCwd, sum, fmt };
+module.exports = { expandHome, parseJSONLFile, readJSONLMap, walkJSONL, textFromContent, projectFromCwd, sum, fmt, clip, safeParse };

@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { expandHome, parseJSONLFile, readJSONLMap, walkJSONL, textFromContent, projectFromCwd } = require('./shared');
+const { expandHome, parseJSONLFile, readJSONLMap, walkJSONL, textFromContent, projectFromCwd, clip } = require('./shared');
 const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
 
 const id = 'codex';
@@ -170,4 +170,38 @@ async function parse(options = {}) {
   return buildResult(sessions, source, capabilities, warnings);
 }
 
-module.exports = { id, label, mark, accent, capabilities, home, detect, parse };
+// On-demand per-turn content: agent_message text + function calls/outputs, keyed
+// by turn_id (the same id the token turns carry, so the UI can match them up).
+async function content(session, options = {}) {
+  let entries;
+  try { entries = await parseJSONLFile(session.filePath); } catch { return { items: [] }; }
+  const byTurn = new Map();
+  const callIndex = {};
+  let currentTurnId = null;
+  let lastTs = null;
+  const ensure = (tid) => {
+    const key = tid || `turn-${byTurn.size + 1}`;
+    if (!byTurn.has(key)) byTurn.set(key, { turnId: key, timestamp: lastTs, output: '', tools: [] });
+    return byTurn.get(key);
+  };
+  for (const entry of entries) {
+    if (entry.timestamp) lastTs = entry.timestamp;
+    const payload = entry.payload || {};
+    if (entry.type === 'turn_context') currentTurnId = payload.turn_id || currentTurnId;
+    if (payload.type === 'user_message') currentTurnId = payload.turn_id || currentTurnId;
+    const tid = payload.turn_id || currentTurnId;
+    if (payload.type === 'agent_message') {
+      const t = ensure(tid); const txt = textFromContent(payload.message || payload.content);
+      t.output = t.output ? `${t.output}\n${txt}` : txt; if (entry.timestamp) t.timestamp = entry.timestamp;
+    } else if (entry.type === 'response_item' && payload.type === 'function_call') {
+      const tool = { name: payload.name || 'tool', input: clip(payload.arguments || '', 4000), result: null };
+      ensure(tid).tools.push(tool); if (payload.call_id) callIndex[payload.call_id] = tool;
+    } else if (entry.type === 'response_item' && payload.type === 'function_call_output') {
+      const tool = callIndex[payload.call_id];
+      if (tool) { const out = payload.output; tool.result = clip(typeof out === 'string' ? out : textFromContent(out) || JSON.stringify(out || ''), 4000); }
+    }
+  }
+  return { items: [...byTurn.values()].map((t) => ({ ...t, output: clip(t.output) })) };
+}
+
+module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content };

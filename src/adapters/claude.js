@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { expandHome, parseJSONLFile } = require('./shared');
+const { expandHome, parseJSONLFile, clip } = require('./shared');
 const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
 
 const id = 'claude';
@@ -208,4 +208,33 @@ async function parse(options = {}) {
   return result;
 }
 
-module.exports = { id, label, mark, accent, capabilities, home, detect, parse };
+// On-demand per-turn content for one session: assistant output text + tool calls
+// (with their results, which Claude logs as tool_result blocks in the next user msg).
+async function content(session, options = {}) {
+  let entries;
+  try { entries = await parseJSONLFile(session.filePath); } catch { return { items: [] }; }
+  const toolResults = {};
+  for (const e of entries) {
+    const c = e.message && e.message.content;
+    if (!Array.isArray(c)) continue;
+    for (const b of c) {
+      if (b.type === 'tool_result' && b.tool_use_id) {
+        const txt = typeof b.content === 'string' ? b.content : (Array.isArray(b.content) ? b.content.map((x) => x.text || '').join('\n') : '');
+        toolResults[b.tool_use_id] = txt;
+      }
+    }
+  }
+  const items = [];
+  for (const e of entries) {
+    if (e.type !== 'assistant' || !e.message?.usage || e.message.model === '<synthetic>') continue;
+    const c = Array.isArray(e.message.content) ? e.message.content : [];
+    const output = c.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+    const tools = c.filter((b) => b.type === 'tool_use').map((b) => ({
+      name: b.name, input: clip(JSON.stringify(b.input, null, 2), 4000), result: clip(toolResults[b.id] || '', 4000),
+    }));
+    items.push({ turnId: e.uuid || null, timestamp: e.timestamp || null, output: clip(output), tools });
+  }
+  return { items };
+}
+
+module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content };

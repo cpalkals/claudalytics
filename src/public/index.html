@@ -171,6 +171,37 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 .turns{display:grid;gap:8px}
 .turn{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2)}
 .turn .rk{width:26px;height:26px;border-radius:7px;background:var(--amber-bg);border:1px solid var(--amber-border);color:var(--amber);font-weight:800;display:grid;place-items:center;font-size:11px}
+.turn.click{cursor:pointer;transition:border-color .14s}
+.turn.click:hover{border-color:var(--focus)}
+.turn .caret{display:inline-block;transition:transform .15s;color:var(--faint);font-size:12px;margin-left:7px}
+.turn.open .caret{transform:rotate(90deg)}
+.turn-detail{display:none;grid-column:1/-1;margin-top:6px;padding-top:11px;border-top:1px dashed var(--line-2)}
+.turn.open .turn-detail{display:block}
+.token-strip.big{height:9px;margin:0 0 12px}
+.bd-grid{display:grid;gap:7px;max-width:360px}
+.bd-row{display:grid;grid-template-columns:1fr auto 48px;align-items:center;font-size:12px;gap:12px}
+.bd-row .bd-k{color:var(--muted);display:flex;align-items:center;gap:7px}
+.bd-row .bd-v{font-family:var(--mono);font-weight:700;color:var(--ink);text-align:right}
+.bd-row .bd-p{font-family:var(--mono);color:var(--soft);text-align:right;font-size:11px}
+.bd-row.total{border-top:1px solid var(--line);margin-top:3px;padding-top:7px}
+.bd-row.total .bd-k{color:var(--ink);font-weight:750}
+.bd-meta{margin-top:9px;font-size:11px;color:var(--soft)}
+.bd-tools{margin-top:9px;font-size:11px;color:var(--soft);line-height:1.55}
+.turn-content{margin-top:13px;display:grid;gap:13px}
+.cnt-h{font-size:10.5px;font-weight:750;color:var(--soft);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;display:flex;align-items:center;gap:7px}
+.cnt-h .dot{width:8px;height:8px;border-radius:50%}
+.cnt-text{font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;max-height:300px;overflow:auto}
+.cnt-note{font-size:11px;color:var(--soft);line-height:1.5;margin-bottom:8px}
+.cnt-tool{border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:8px;background:var(--surface)}
+.cnt-tool-h{font-family:var(--mono);font-size:11.5px;font-weight:700;color:var(--blue)}
+.cnt-sub{font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin:7px 0 2px}
+.cnt-pre{font-family:var(--mono);font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-word;background:var(--surface-3);border-radius:6px;padding:8px 10px;margin:3px 0 0;max-height:220px;overflow:auto;color:var(--muted)}
+.cnt-det{font-size:11.5px;margin-top:4px}
+.cnt-det summary{cursor:pointer;color:var(--soft);padding:4px 0;user-select:none}
+.cnt-prior{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line-3);font-size:11.5px}
+.cnt-prior .rk{width:20px;height:20px;border-radius:6px;background:var(--surface-3);color:var(--soft);font-weight:700;display:grid;place-items:center;font-size:10px;font-family:var(--mono)}
+.cnt-prior-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.cnt-load{font-size:11px;color:var(--soft);padding:4px 0}
 /* share overlay */
 .overlay{position:fixed;inset:0;background:var(--overlay);backdrop-filter:blur(4px);z-index:60;display:none;align-items:center;justify-content:center;padding:20px}
 .overlay.open{display:flex}
@@ -237,7 +268,7 @@ async function fetchData(refresh=false){
   const qs='?source='+encodeURIComponent(sourceId);
   const res=await fetch((refresh?'/api/refresh':'/api/data')+qs);
   if(!res.ok)throw new Error((await res.json()).error||'Failed to load data');
-  if(refresh){DATA=await(await fetch('/api/data'+qs)).json()}else DATA=await res.json();
+  if(refresh){DATA=await(await fetch('/api/data'+qs)).json();for(const k in contentCache)delete contentCache[k]}else DATA=await res.json();
   if(DATA.source)applyAccent(DATA.source.accent);
   if(!selectedSessionId&&DATA.sessions[0])selectedSessionId=DATA.sessions[0].sessionId;
   render();
@@ -327,6 +358,36 @@ function promptsView(){const items=DATA.topPrompts.slice(0,25);if(!items.length)
 function promptRankForTop(p){const s=DATA.sessions.find(x=>x.sessionId===p.sessionId);const match=s?.promptBreakdown.find(x=>x.prompt===p.prompt&&x.totalTokens===p.totalTokens);return match?match.rank:1}
 function toolText(tools){return tools?.length?tools.slice(0,2).map(t=>`${t.tool} ${t.count}`).join(' · '):'no tools'}
 function strip(o){const total=Math.max(o.totalTokens||((o.inputTokens||0)+(o.outputTokens||0)),1),fresh=freshInput(o),cached=o.cachedInputTokens||0,reason=o.reasoningOutputTokens||0,out=visibleOut(o);return`<span class="fresh" style="width:${fresh/total*100}%"></span><span class="cached" style="width:${cached/total*100}%"></span><span class="reason" style="width:${reason/total*100}%"></span><span class="out" style="width:${out/total*100}%"></span>`}
+function toggleTurn(el){el.classList.toggle('open');if(el.classList.contains('open')){const box=el.querySelector('.turn-content');if(box)loadTurnContent(box)}}
+const contentCache={};
+async function fetchSessionContent(sid){if(contentCache[sid])return contentCache[sid];const p=fetch('/api/content?source='+encodeURIComponent(sourceId)+'&session='+encodeURIComponent(sid)).then(r=>r.json()).catch(()=>({items:[],supported:false}));contentCache[sid]=p;return p}
+async function loadTurnContent(box){if(box.dataset.loaded)return;box.dataset.loaded='1';const sid=selectedSessionId;box.innerHTML='<div class="cnt-load">Loading content…</div>';const data=await fetchSessionContent(sid);if(sid!==selectedSessionId)return;const items=data.items||[];const session=DATA.sessions.find(s=>s.sessionId===sid);const p=session&&(session.promptBreakdown.find(x=>x.rank===selectedPromptRank)||session.promptBreakdown[0]);const turn=p?p.turns[+box.dataset.idx]:null;const tid=box.dataset.turn,ts=box.dataset.time;let it=tid?items.find(x=>x.turnId===tid):null;if(!it&&ts)it=items.find(x=>x.timestamp===ts);if(!it&&ts&&items.length)it=items.map(x=>({x,d:x.timestamp?Math.abs(new Date(x.timestamp)-new Date(ts)):Infinity})).sort((a,b)=>a.d-b.d)[0].x;box.innerHTML=renderContent(it,p,turn,data.supported!==false)}
+function renderContent(it,p,turn,supported){const promptText=p&&p.prompt;let h='';
+  h+=`<div><div class="cnt-h"><i class="dot" style="background:var(--blue)"></i>Prompt (given)</div><div class="cnt-text">${promptText?esc(promptText):'<span class="muted">(continuation — no new user prompt)</span>'}</div></div>`;
+  const out=it&&it.output;
+  h+=`<div><div class="cnt-h"><i class="dot" style="background:var(--amber)"></i>Output (given out)</div><div class="cnt-text">${out?esc(out):`<span class="muted">${supported?(it?'No assistant text recorded for this turn.':'Could not match a response to this turn.'):"Content view isn't available for this provider."}</span>`}</div></div>`;
+  const tools=(it&&it.tools)||[];
+  if(tools.length)h+=`<div><div class="cnt-h">Tool calls (${tools.length})</div>${tools.map(t=>`<div class="cnt-tool"><div class="cnt-tool-h">${esc(t.name)}</div>${t.input?`<div class="cnt-sub">input</div><pre class="cnt-pre">${esc(t.input)}</pre>`:''}${t.result?`<div class="cnt-sub">result</div><pre class="cnt-pre">${esc(t.result)}</pre>`:''}</div>`).join('')}</div>`;
+  if(caps().cache&&turn&&(turn.cachedInputTokens||0)>0){const session=DATA.sessions.find(s=>s.sessionId===selectedSessionId);const prior=session?session.promptBreakdown.filter(x=>x.rank<selectedPromptRank):[];
+    h+=`<div><div class="cnt-h"><i class="dot" style="background:var(--green)"></i>Cached context · ${fmt(turn.cachedInputTokens)} tokens reused</div><div class="cnt-note">Caching keeps no separate text — these are the reused prefix tokens (system prompt + earlier turns) sent again at a fraction of the price, not new content.</div>${prior.length?`<details class="cnt-det"><summary>${prior.length} earlier prompt${prior.length===1?'':'s'} carried forward as context</summary>${prior.map(pp=>`<div class="cnt-prior"><span class="rk">${pp.rank}</span><span class="cnt-prior-t" title="${esc(pp.prompt)}">${esc(pp.prompt)}</span><span class="muted">${fmt(pp.totalTokens)}</span></div>`).join('')}</details>`:''}</div>`;}
+  return h}
+function turnDetail(t,i){const C=caps();const total=Math.max(t.totalTokens||((t.inputTokens||0)+(t.outputTokens||0)),1);const fresh=freshInput(t),cached=t.cachedInputTokens||0,reason=t.reasoningOutputTokens||0,out=visibleOut(t),input=(t.inputTokens||0);
+  const row=(color,label,val,sub)=>`<div class="bd-row${sub?' sub':''}"><span class="bd-k">${color?`<i class="dot" style="background:${color}"></i>`:'<i class="dot" style="background:transparent"></i>'}${label}</span><span class="bd-v">${fmt(val)}</span><span class="bd-p">${Math.round(val/total*100)}%</span></div>`;
+  return `<div class="turn-detail" onclick="event.stopPropagation()">
+    <div class="token-strip big">${strip(t)}</div>
+    <div class="bd-grid">
+      ${row('','Input (given)',input)}
+      ${row('var(--blue)','· Fresh input',fresh)}
+      ${C.cache?row('var(--green)','· Cached input',cached):''}
+      ${row('var(--amber)','Output (given out)',visibleOut(t)+reason)}
+      ${C.reasoning&&reason?row('var(--mauve)','· Reasoning',reason):''}
+      <div class="bd-row total"><span class="bd-k">Total</span><span class="bd-v">${fmt(total)}</span><span class="bd-p"></span></div>
+    </div>
+    ${C.cost&&t.cost?`<div class="bd-meta">Est. cost ≈ $${Number(t.cost).toFixed(4)}</div>`:''}
+    ${t.contextWindow?`<div class="bd-meta">Context window: ${fmt(t.contextWindow)} tokens</div>`:''}
+    ${t.tools&&t.tools.length?`<div class="bd-tools">Tools this turn: ${t.tools.map(esc).join(', ')}</div>`:''}
+    <div class="turn-content" data-turn="${esc(t.turnId||'')}" data-time="${esc(t.timestamp||'')}" data-idx="${i}"></div>
+  </div>`}
 
 /* ===== INSIGHTS ===== */
 function insightsView(){const ins=DATA.insights.length?DATA.insights:[{type:'neutral',title:'Usage parsed',detail:'Open a session to inspect prompt-level token tracking.'}];return`<section class="card section"><div class="section-head"><h2>Insights</h2><span class="muted">${ins.length} findings from your local data</span></div><div class="insights col">${ins.map(insight).join('')}</div></section>`}
@@ -353,7 +414,7 @@ function promptDetail(p){return`<div><div class="section-head"><h2>Prompt #${p.r
 <div class="mini-stats"><div class="mini"><div class="label">Total</div><div class="value">${fmt(p.totalTokens)}</div></div><div class="mini"><div class="label">Fresh In</div><div class="value">${fmt(freshInput(p))}</div></div><div class="mini"><div class="label">Cached</div><div class="value">${fmt(p.cachedInputTokens)}</div></div><div class="mini"><div class="label">${caps().reasoning?'Reasoning':'Output'}</div><div class="value">${fmt(caps().reasoning?p.reasoningOutputTokens:p.outputTokens)}</div></div><div class="mini"><div class="label">Turns</div><div class="value">${fmt(p.turnCount)}</div></div></div>
 <div class="card section" style="padding:14px"><div class="muted" style="font-weight:700;margin-bottom:6px">Token cost per turn</div><canvas id="turnChart" height="170"></canvas></div>
 ${(p.tools||[]).length?`<div>${p.tools.map(t=>`<span class="tool-chip">${esc(t.tool)} · ${fmt(t.count)}</span>`).join('')}</div>`:''}
-<div class="turns">${p.turns.map((t,i)=>`<div class="turn"><div class="rk">${i+1}</div><div><strong style="font-size:12px">${timeFmt(t.timestamp)}</strong><div class="muted">${esc(t.model)}${t.contextWindow?' · ctx '+fmt(t.contextWindow):''}</div><div class="token-strip">${strip(t)}</div></div><div class="num">${fmt(t.totalTokens)}<div class="muted" style="font-weight:600">${fmt(freshInput(t))} fresh · ${fmt(t.cachedInputTokens)} cached · ${fmt(t.outputTokens)} out</div></div></div>`).join('')}</div>`}
+<div class="turns">${p.turns.map((t,i)=>`<div class="turn click" onclick="toggleTurn(this)"><div class="rk">${i+1}</div><div><strong style="font-size:12px">${timeFmt(t.timestamp)}</strong><span class="caret">›</span><div class="muted">${esc(t.model)}${t.contextWindow?' · ctx '+fmt(t.contextWindow):''}</div><div class="token-strip">${strip(t)}</div></div><div class="num">${fmt(t.totalTokens)}<div class="muted" style="font-weight:600">${fmt(freshInput(t))} fresh · ${fmt(t.cachedInputTokens)} cached · ${fmt(t.outputTokens)} out</div></div>${turnDetail(t,i)}</div>`).join('')}</div>`}
 
 /* ===== charts ===== */
 function setupCanvas(id,h){const c=document.getElementById(id);if(!c)return null;const ctx=c.getContext('2d'),dpr=Math.min(window.devicePixelRatio||1,2);let w=c.clientWidth||(c.parentElement&&c.parentElement.clientWidth)||600;w=Math.max(120,Math.min(w,2400));h=h||c.height||210;c.width=Math.round(w*dpr);c.height=Math.round(h*dpr);c.style.height=h+'px';ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);return{ctx,width:w,height:h,el:c}}

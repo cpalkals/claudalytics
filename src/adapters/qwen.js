@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { expandHome, parseJSONLFile, walkJSONL, textFromContent, projectFromCwd } = require('./shared');
+const { expandHome, parseJSONLFile, walkJSONL, textFromContent, projectFromCwd, clip } = require('./shared');
 const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
 
 const id = 'qwen';
@@ -135,4 +135,26 @@ async function parse(options = {}) {
   return buildResult(sessions, source, capabilities, warnings);
 }
 
-module.exports = { id, label, mark, accent, capabilities, home, detect, parse };
+// On-demand per-turn content: model text + functionCall parts (with responses).
+async function content(session, options = {}) {
+  let entries;
+  try { entries = await parseJSONLFile(session.filePath); } catch { return { items: [] }; }
+  const items = [];
+  for (const e of entries) {
+    const msg = e.message || {};
+    const um = e.usageMetadata || msg.usageMetadata;
+    if (!um || !(um.totalTokenCount || um.promptTokenCount || um.candidatesTokenCount)) continue;
+    const parts = Array.isArray(msg.parts) ? msg.parts : [];
+    const output = parts.filter((p) => p && typeof p === 'object' && p.text).map((p) => p.text).join('\n').trim()
+      || (typeof msg.content === 'string' ? msg.content : '');
+    const responses = {};
+    for (const p of parts) if (p && p.functionResponse) responses[p.functionResponse.name] = clip(JSON.stringify(p.functionResponse.response || ''), 4000);
+    const tools = parts.filter((p) => p && p.functionCall).map((p) => ({
+      name: p.functionCall.name, input: clip(JSON.stringify(p.functionCall.args || {}, null, 2), 4000), result: responses[p.functionCall.name] || null,
+    }));
+    items.push({ turnId: e.uuid || null, timestamp: e.timestamp || null, output: clip(output), tools });
+  }
+  return { items };
+}
+
+module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content };

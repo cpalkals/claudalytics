@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { expandHome, projectFromCwd } = require('./shared');
+const { expandHome, projectFromCwd, clip } = require('./shared');
 const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
 
 const id = 'opencode';
@@ -152,4 +152,35 @@ async function parse(options = {}) {
   return buildResult(sessions, source, capabilities, warnings);
 }
 
-module.exports = { id, label, mark, accent, capabilities, home, detect, parse };
+// On-demand per-turn content: assistant text parts + tool parts (input/output),
+// keyed by message id (the turnId the dashboard already uses for OpenCode turns).
+async function content(session, options = {}) {
+  const DatabaseSync = loadSqlite();
+  if (!DatabaseSync) return { items: [], supported: false };
+  let db;
+  try { db = new DatabaseSync(dbPath(options), { readOnly: true }); } catch { return { items: [] }; }
+  const items = [];
+  try {
+    const messages = db.prepare('SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created ASC').all(session.sessionId);
+    const partStmt = db.prepare('SELECT data FROM part WHERE message_id = ?');
+    for (const m of messages) {
+      const d = safeParse(m.data);
+      if (d.role !== 'assistant') continue;
+      const parts = partStmt.all(m.id).map((r) => safeParse(r.data));
+      const output = parts.filter((p) => p.type === 'text').map((p) => p.text).filter(Boolean).join('\n').trim();
+      const tools = parts.filter((p) => toolNameFromPart(p)).map((p) => {
+        const st = p.state || {};
+        const out = st.output != null ? st.output : p.output;
+        return {
+          name: toolNameFromPart(p),
+          input: clip(JSON.stringify(st.input || p.input || {}, null, 2), 4000),
+          result: clip(typeof out === 'string' ? out : JSON.stringify(out || ''), 4000),
+        };
+      });
+      items.push({ turnId: m.id, timestamp: new Date(m.time_created).toISOString(), output: clip(output), tools });
+    }
+  } catch { /* return what we have */ } finally { try { db.close(); } catch { /* */ } }
+  return { items };
+}
+
+module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content };
