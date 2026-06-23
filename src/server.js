@@ -68,7 +68,12 @@ function createServer(options = {}) {
     }
   });
 
-  app.use(express.static(path.join(__dirname, 'public')));
+  // Local dashboard: never let the browser serve a stale build of the UI.
+  app.use(express.static(path.join(__dirname, 'public'), {
+    etag: false,
+    lastModified: false,
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-store'),
+  }));
   return app;
 }
 
