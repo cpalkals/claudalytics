@@ -170,8 +170,8 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 .pf-label{font-size:10px;font-weight:750;letter-spacing:.05em;color:var(--soft);text-transform:uppercase;flex:0 0 auto}
 .pf-preview{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 .prompt-full[open] .pf-preview{display:none}
-.prompt-full-text{padding:2px 13px 13px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--ink)}
-.prompt-full-text.sys{font-family:var(--mono);font-size:11.5px;color:var(--muted);max-height:55vh;overflow:auto}
+.prompt-full-text{padding:2px 13px 13px;font-size:12.5px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
+.prompt-full-text.sys{font-family:var(--mono);font-size:11.5px;line-height:1.55;color:var(--muted)}
 .prompt-rail{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
 .prail-item{flex:0 0 220px;border:1px solid var(--line);background:var(--surface-2);border-radius:9px;padding:10px;cursor:pointer;transition:border-color .14s}
 .prail-item:hover,.prail-item.active{border-color:var(--focus)}
@@ -386,7 +386,7 @@ function renderContent(it,p,turn,supported,items){const promptText=p&&p.prompt;l
   if(tools.length)h+=`<div><div class="cnt-h">Tool calls (${tools.length})</div>${tools.map(t=>`<div class="cnt-tool"><div class="cnt-tool-h">${esc(t.name)}</div>${t.input?`<div class="cnt-sub">input</div><pre class="cnt-pre">${esc(t.input)}</pre>`:''}${t.result?`<div class="cnt-sub">result</div><pre class="cnt-pre">${esc(t.result)}</pre>`:''}</div>`).join('')}</div>`;
   if(caps().cache&&turn&&(turn.cachedInputTokens||0)>0){const session=DATA.sessions.find(s=>s.sessionId===selectedSessionId);const prior=session?session.promptBreakdown.filter(x=>x.rank<selectedPromptRank):[];
     const om={};for(const x of (items||[]))if(x.turnId)om[x.turnId]=x;
-    h+=`<div><div class="cnt-h"><i class="dot" style="background:var(--green)"></i>Cached context · ${fmt(turn.cachedInputTokens)} tokens reused</div><div class="cnt-note">This is the conversation prefix re-sent from cache for this turn — the earlier turns below, billed at a fraction of fresh tokens. (The system prompt is also part of the prefix but isn't recorded in the logs.)</div>`;
+    h+=`<div><div class="cnt-h"><i class="dot" style="background:var(--green)"></i>Cached context · ${fmt(turn.cachedInputTokens)} tokens reused</div><div class="cnt-note">This is the conversation prefix re-sent from cache for this turn — the earlier turns below, billed at a fraction of fresh tokens. (The system prompt is also part of the prefix — see the System prompt panel above.)</div>`;
     if(prior.length){h+=`<details class="cnt-det"><summary>Show ${prior.length} earlier turn${prior.length===1?'':'s'} reused as context</summary>`;
       for(const pp of prior){const outs=pp.turns.map(tt=>om[tt.turnId]&&om[tt.turnId].output).filter(Boolean).join('\n\n');
         h+=`<div class="cnt-rt"><div class="cnt-rt-q"><span class="rk">${pp.rank}</span><span class="cnt-prior-t" title="${esc(pp.prompt)}">${esc(pp.prompt)}</span><span class="muted">${fmt(pp.totalTokens)}</span></div>${outs?`<div class="cnt-rt-a">${esc(outs)}</div>`:''}</div>`;}

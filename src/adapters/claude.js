@@ -68,8 +68,11 @@ function detect(options = {}) {
 }
 
 // Pair each user prompt with the assistant usage turns that follow it.
+// Claude Code logs one JSONL line per content block of a response, repeating the
+// same message.usage on each — so we group by message.id and count usage once.
 function extractTurns(entries) {
   const turns = [];
+  const byId = new Map();
   let pendingPrompt = null;
   for (const entry of entries) {
     if (entry.type === 'user' && entry.message?.role === 'user') {
@@ -82,9 +85,16 @@ function extractTurns(entries) {
       pendingPrompt = text || null;
     }
     if (entry.type === 'assistant' && entry.message?.usage) {
-      const u = entry.message.usage;
       const model = entry.message.model || 'unknown';
       if (model === '<synthetic>') continue;
+      const tools = [];
+      if (Array.isArray(entry.message.content)) {
+        for (const b of entry.message.content) if (b.type === 'tool_use' && b.name) tools.push(b.name);
+      }
+      const msgId = entry.message.id || entry.uuid || `turn-${turns.length + 1}`;
+      // Another content block of a response we already counted — merge tools only.
+      if (byId.has(msgId)) { for (const name of tools) turns[byId.get(msgId)].tools.push(name); continue; }
+      const u = entry.message.usage;
       const pricing = getPricing(model);
       const inputTokens = u.input_tokens || 0;
       const cacheCreate = u.cache_creation_input_tokens || 0;
@@ -94,12 +104,9 @@ function extractTurns(entries) {
       // and cacheRead as the "cached" slice, to match the dashboard's token model.
       const totalInput = inputTokens + cacheCreate + cacheRead;
       const cost = inputTokens * pricing.input + cacheCreate * pricing.cacheWrite + cacheRead * pricing.cacheRead + outputTokens * pricing.output;
-      const tools = [];
-      if (Array.isArray(entry.message.content)) {
-        for (const b of entry.message.content) if (b.type === 'tool_use' && b.name) tools.push(b.name);
-      }
+      byId.set(msgId, turns.length);
       turns.push({
-        turnId: entry.uuid || `turn-${turns.length + 1}`,
+        turnId: msgId,
         timestamp: entry.timestamp,
         prompt: pendingPrompt,
         model,
@@ -225,6 +232,7 @@ async function content(session, options = {}) {
     }
   }
   const items = [];
+  const byId = new Map();
   for (const e of entries) {
     if (e.type !== 'assistant' || !e.message?.usage || e.message.model === '<synthetic>') continue;
     const c = Array.isArray(e.message.content) ? e.message.content : [];
@@ -232,8 +240,18 @@ async function content(session, options = {}) {
     const tools = c.filter((b) => b.type === 'tool_use').map((b) => ({
       name: b.name, input: clip(JSON.stringify(b.input, null, 2), 4000), result: clip(toolResults[b.id] || '', 4000),
     }));
-    items.push({ turnId: e.uuid || null, timestamp: e.timestamp || null, output: clip(output), tools });
+    const msgId = e.message.id || e.uuid || null;
+    // Merge content blocks that belong to the same response (same message.id).
+    if (msgId != null && byId.has(msgId)) {
+      const it = items[byId.get(msgId)];
+      if (output) it.output = it.output ? `${it.output}\n${output}` : output;
+      it.tools.push(...tools);
+      continue;
+    }
+    if (msgId != null) byId.set(msgId, items.length);
+    items.push({ turnId: msgId, timestamp: e.timestamp || null, output, tools });
   }
+  for (const it of items) it.output = clip(it.output);
   return { items };
 }
 
