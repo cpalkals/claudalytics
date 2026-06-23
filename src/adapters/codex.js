@@ -175,6 +175,21 @@ async function parse(options = {}) {
 async function content(session, options = {}) {
   let entries;
   try { entries = await parseJSONLFile(session.filePath); } catch { return { items: [] }; }
+  // Codex records its system prompt in session_meta.base_instructions, plus the
+  // initial <environment_context> / <permissions instructions> input blocks.
+  let system = null;
+  const meta = entries.find((e) => e.type === 'session_meta')?.payload || {};
+  const bi = meta.base_instructions;
+  const biText = typeof bi === 'string' ? bi : (bi && bi.text) || '';
+  const context = [];
+  for (const e of entries) {
+    const p = e.payload || {};
+    if (p.type === 'message' && p.role === 'user' && Array.isArray(p.content)) {
+      const t = textFromContent(p.content);
+      if (t.startsWith('<')) context.push(t); else break;
+    }
+  }
+  if (biText || context.length) system = clip([biText, ...context].filter(Boolean).join('\n\n'), 60000);
   const byTurn = new Map();
   const callIndex = {};
   let currentTurnId = null;
@@ -201,7 +216,7 @@ async function content(session, options = {}) {
       if (tool) { const out = payload.output; tool.result = clip(typeof out === 'string' ? out : textFromContent(out) || JSON.stringify(out || ''), 4000); }
     }
   }
-  return { items: [...byTurn.values()].map((t) => ({ ...t, output: clip(t.output) })) };
+  return { system, items: [...byTurn.values()].map((t) => ({ ...t, output: clip(t.output) })) };
 }
 
 module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content };

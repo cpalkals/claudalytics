@@ -170,7 +170,8 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 .pf-label{font-size:10px;font-weight:750;letter-spacing:.05em;color:var(--soft);text-transform:uppercase;flex:0 0 auto}
 .pf-preview{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 .prompt-full[open] .pf-preview{display:none}
-.prompt-full-text{padding:2px 13px 13px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--ink);max-height:300px;overflow:auto}
+.prompt-full-text{padding:2px 13px 13px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--ink)}
+.prompt-full-text.sys{font-family:var(--mono);font-size:11.5px;color:var(--muted);max-height:55vh;overflow:auto}
 .prompt-rail{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
 .prail-item{flex:0 0 220px;border:1px solid var(--line);background:var(--surface-2);border-radius:9px;padding:10px;cursor:pointer;transition:border-color .14s}
 .prail-item:hover,.prail-item.active{border-color:var(--focus)}
@@ -376,6 +377,7 @@ function toggleTurn(el){el.classList.toggle('open');if(el.classList.contains('op
 const contentCache={};
 async function fetchSessionContent(sid){if(contentCache[sid])return contentCache[sid];const p=fetch('/api/content?source='+encodeURIComponent(sourceId)+'&session='+encodeURIComponent(sid)).then(r=>r.json()).catch(()=>({items:[],supported:false}));contentCache[sid]=p;return p}
 async function loadTurnContent(box){if(box.dataset.loaded)return;box.dataset.loaded='1';const sid=selectedSessionId;box.innerHTML='<div class="cnt-load">Loading content…</div>';const data=await fetchSessionContent(sid);if(sid!==selectedSessionId)return;const items=data.items||[];const session=DATA.sessions.find(s=>s.sessionId===sid);const p=session&&(session.promptBreakdown.find(x=>x.rank===selectedPromptRank)||session.promptBreakdown[0]);const turn=p?p.turns[+box.dataset.idx]:null;const tid=box.dataset.turn,ts=box.dataset.time;let it=tid?items.find(x=>x.turnId===tid):null;if(!it&&ts)it=items.find(x=>x.timestamp===ts);if(!it&&ts&&items.length)it=items.map(x=>({x,d:x.timestamp?Math.abs(new Date(x.timestamp)-new Date(ts)):Infinity})).sort((a,b)=>a.d-b.d)[0].x;box.innerHTML=renderContent(it,p,turn,data.supported!==false,items)}
+async function loadSystemPrompt(el){if(el.dataset.loaded)return;el.dataset.loaded='1';const box=el.querySelector('[data-sys]');box.textContent='Loading…';const sid=selectedSessionId;const data=await fetchSessionContent(sid);if(sid!==selectedSessionId)return;if(data.system){box.classList.add('sys');box.textContent=data.system}else{box.classList.remove('sys');box.innerHTML=`<span class="muted">${esc((DATA.source&&DATA.source.label)||'This agent')} doesn't record the system prompt in its local logs, so it can't be shown.</span>`}}
 function renderContent(it,p,turn,supported,items){const promptText=p&&p.prompt;let h='';
   h+=`<div><div class="cnt-h"><i class="dot" style="background:var(--blue)"></i>Prompt (given)</div><div class="cnt-text">${promptText?esc(promptText):'<span class="muted">(continuation — no new user prompt)</span>'}</div></div>`;
   const out=it&&it.output;
@@ -427,6 +429,7 @@ document.getElementById('drawerContent').innerHTML=`
 <div class="drawer-head"><div><div class="drawer-title">${esc(session.title)}</div><div class="drawer-meta"><span>${esc(session.project)}</span>·<span class="badge">${esc(session.model)}</span>·<span>${fmt(session.totalTokens)} tokens</span>·<span>${fmt(session.promptCount)} prompts</span>${ctxPct!=null?`·<span>peak ctx ${ctxPct}%</span>`:''}</div></div><button class="iconbtn" onclick="closeDrawer()" title="Close">×</button></div>
 <div class="drawer-body">
   <details class="prompt-full"><summary><span class="pf-label">Prompt</span><span class="pf-preview">${esc(p.prompt)}</span></summary><div class="prompt-full-text">${esc(p.prompt)||'<span class="muted">(continuation — no new prompt)</span>'}</div></details>
+  <details class="prompt-full" ontoggle="if(this.open)loadSystemPrompt(this)"><summary><span class="pf-label">System prompt</span><span class="pf-preview">the instructions this session ran with — click to load</span></summary><div class="prompt-full-text sys" data-sys="1"></div></details>
   <div><div class="muted" style="margin-bottom:8px;font-weight:700">Prompts in session (${session.promptBreakdown.length})</div><div class="prompt-rail">${session.promptBreakdown.map(pp=>`<div class="prail-item ${pp.rank===selectedPromptRank?'active':''}" onclick="selectPrompt(${pp.rank})"><div class="pt">${esc(pp.prompt)}</div><div class="muted" style="margin-top:5px;font-size:11px">${fmt(pp.totalTokens)} · ${fmt(pp.turnCount)} turns</div><div class="token-strip">${strip(pp)}</div></div>`).join('')}</div></div>
   ${p?promptDetail(p):''}
 </div>`;

@@ -62,7 +62,7 @@ function createServer(options = {}) {
       if (typeof adapter.content !== 'function') return res.json({ supported: false, items: [] });
       const opts = sourceId === 'codex' ? { codexHome: options.codexHome } : {};
       const data = await adapter.content(session, opts);
-      res.json({ supported: data.supported !== false, items: data.items || [] });
+      res.json({ supported: data.supported !== false, items: data.items || [], system: data.system || null });
     } catch (err) {
       res.status(500).json(friendlyError(err));
     }
