@@ -162,16 +162,17 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 .mini{border:1px solid var(--line);border-radius:9px;background:var(--surface-2);padding:10px}
 .mini .label{color:var(--faint);font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono)}
 .mini .value{font-size:17px;margin-top:5px;font-weight:780}
-.prompt-full{border:1px solid var(--line);border-radius:10px;background:var(--surface-2);overflow:hidden}
-.prompt-full>summary{cursor:pointer;list-style:none;padding:11px 13px;display:flex;align-items:center;gap:10px;font-size:12px;user-select:none}
-.prompt-full>summary::-webkit-details-marker{display:none}
-.prompt-full>summary::before{content:'›';color:var(--faint);transition:transform .15s;display:inline-block;font-size:15px;line-height:1}
-.prompt-full[open]>summary::before{transform:rotate(90deg)}
-.pf-label{font-size:10px;font-weight:750;letter-spacing:.05em;color:var(--soft);text-transform:uppercase;flex:0 0 auto}
-.pf-preview{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
-.prompt-full[open] .pf-preview{display:none}
-.prompt-full-text{padding:2px 13px 13px;font-size:12.5px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
-.prompt-full-text.sys{font-family:var(--mono);font-size:11.5px;line-height:1.55;color:var(--muted)}
+.pbox{border:1px solid var(--line);border-radius:10px;background:var(--surface-2);overflow:hidden}
+.pbox-head{width:100%;text-align:left;background:none;border:0;color:inherit;cursor:pointer;padding:11px 13px;display:flex;align-items:center;gap:10px;font:inherit}
+.pbox-head:hover{background:var(--surface-3)}
+.pbox-label{font-size:10px;font-weight:750;letter-spacing:.05em;color:var(--soft);text-transform:uppercase;flex:0 0 auto}
+.pbox-prev{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-size:12px}
+.pbox.open .pbox-prev{display:none}
+.pbox-caret{margin-left:auto;color:var(--faint);font-size:15px;line-height:1;transition:transform .15s;flex:0 0 auto}
+.pbox.open .pbox-caret{transform:rotate(90deg)}
+.pbox-body{display:none;padding:0 13px 13px;font-size:12.5px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink)}
+.pbox.open .pbox-body{display:block}
+.pbox-body.sys{font-family:var(--mono);font-size:11.5px;line-height:1.55;color:var(--muted)}
 .prompt-rail{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
 .prail-item{flex:0 0 220px;border:1px solid var(--line);background:var(--surface-2);border-radius:9px;padding:10px;cursor:pointer;transition:border-color .14s}
 .prail-item:hover,.prail-item.active{border-color:var(--focus)}
@@ -381,7 +382,8 @@ function turnActionChip(t){if(!Array.isArray(t.tools))return'';let label,cls;if(
 const contentCache={};
 async function fetchSessionContent(sid){if(contentCache[sid])return contentCache[sid];const p=fetch('/api/content?source='+encodeURIComponent(sourceId)+'&session='+encodeURIComponent(sid)).then(r=>r.json()).catch(()=>({items:[],supported:false}));contentCache[sid]=p;return p}
 async function loadTurnContent(box){if(box.dataset.loaded)return;box.dataset.loaded='1';const sid=selectedSessionId;box.innerHTML='<div class="cnt-load">Loading content…</div>';const data=await fetchSessionContent(sid);if(sid!==selectedSessionId)return;const items=data.items||[];const session=DATA.sessions.find(s=>s.sessionId===sid);const p=session&&(session.promptBreakdown.find(x=>x.rank===selectedPromptRank)||session.promptBreakdown[0]);const turn=p?p.turns[+box.dataset.idx]:null;const tid=box.dataset.turn,ts=box.dataset.time;let it=tid?items.find(x=>x.turnId===tid):null;if(!it&&ts)it=items.find(x=>x.timestamp===ts);if(!it&&ts&&items.length)it=items.map(x=>({x,d:x.timestamp?Math.abs(new Date(x.timestamp)-new Date(ts)):Infinity})).sort((a,b)=>a.d-b.d)[0].x;box.innerHTML=renderContent(it,p,turn,data.supported!==false,items)}
-async function loadSystemPrompt(el){if(el.dataset.loaded)return;el.dataset.loaded='1';const box=el.querySelector('[data-sys]');box.textContent='Loading…';const sid=selectedSessionId;const data=await fetchSessionContent(sid);if(sid!==selectedSessionId)return;if(data.system){box.classList.add('sys');box.textContent=data.system}else{box.classList.remove('sys');box.innerHTML=`<span class="muted">${esc((DATA.source&&DATA.source.label)||'This agent')} doesn't record the system prompt in its local logs, so it can't be shown.</span>`}}
+function togglePbox(btn,cb){const box=btn.parentElement;box.classList.toggle('open');if(box.classList.contains('open')&&cb)cb(box)}
+async function loadSystemPrompt(box){if(box.dataset.loaded)return;box.dataset.loaded='1';const el=box.querySelector('[data-sys]');el.textContent='Loading…';const sid=selectedSessionId;const data=await fetchSessionContent(sid);if(sid!==selectedSessionId)return;if(data.system){el.classList.add('sys');el.textContent=data.system}else{el.classList.remove('sys');el.innerHTML=`<span class="muted">${esc((DATA.source&&DATA.source.label)||'This agent')} doesn't record the system prompt in its local logs, so it can't be shown.</span>`}}
 function renderContent(it,p,turn,supported,items){const promptText=p&&p.prompt;let h='';
   h+=`<div><div class="cnt-h"><i class="dot" style="background:var(--blue)"></i>Prompt (given)</div><div class="cnt-text">${promptText?esc(promptText):'<span class="muted">(continuation — no new user prompt)</span>'}</div></div>`;
   const out=it&&it.output;
@@ -432,8 +434,8 @@ function renderDrawer(){const session=DATA.sessions.find(s=>s.sessionId===select
 document.getElementById('drawerContent').innerHTML=`
 <div class="drawer-head"><div><div class="drawer-title">${esc(session.title)}</div><div class="drawer-meta"><span>${esc(session.project)}</span>·<span class="badge">${esc(session.model)}</span>·<span>${fmt(session.totalTokens)} tokens</span>·<span>${fmt(session.promptCount)} prompts</span>${ctxPct!=null?`·<span>peak ctx ${ctxPct}%</span>`:''}</div></div><button class="iconbtn" onclick="closeDrawer()" title="Close">×</button></div>
 <div class="drawer-body">
-  <details class="prompt-full" open><summary><span class="pf-label">Prompt #${p.rank}</span><span class="pf-preview">${esc(p.prompt)}</span></summary><div class="prompt-full-text">${esc(p.prompt)||'<span class="muted">(continuation — no new prompt)</span>'}</div></details>
-  <details class="prompt-full" ontoggle="if(this.open)loadSystemPrompt(this)"><summary><span class="pf-label">System prompt</span><span class="pf-preview">the instructions this session ran with — click to load</span></summary><div class="prompt-full-text sys" data-sys="1"></div></details>
+  <div class="pbox open"><button class="pbox-head" onclick="togglePbox(this)"><span class="pbox-label">Prompt #${p.rank}</span><span class="pbox-prev">${esc(p.prompt)}</span><span class="pbox-caret">›</span></button><div class="pbox-body">${esc(p.prompt)||'<span class="muted">(continuation — no new prompt)</span>'}</div></div>
+  <div class="pbox"><button class="pbox-head" onclick="togglePbox(this,loadSystemPrompt)"><span class="pbox-label">System prompt</span><span class="pbox-prev">the instructions this session ran with — click to load</span><span class="pbox-caret">›</span></button><div class="pbox-body sys" data-sys="1"></div></div>
   <div><div class="muted" style="margin-bottom:8px;font-weight:700">Prompts in session (${session.promptBreakdown.length})</div><div class="prompt-rail">${session.promptBreakdown.map(pp=>`<div class="prail-item ${pp.rank===selectedPromptRank?'active':''}" onclick="selectPrompt(${pp.rank})"><div class="pt">${esc(pp.prompt)}</div><div class="muted" style="margin-top:5px;font-size:11px">${fmt(pp.totalTokens)} · ${fmt(pp.turnCount)} turns</div><div class="token-strip">${strip(pp)}</div></div>`).join('')}</div></div>
   ${p?promptDetail(p):''}
 </div>`;
