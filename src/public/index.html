@@ -162,6 +162,15 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 .mini{border:1px solid var(--line);border-radius:9px;background:var(--surface-2);padding:10px}
 .mini .label{color:var(--faint);font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.06em;font-family:var(--mono)}
 .mini .value{font-size:17px;margin-top:5px;font-weight:780}
+.prompt-full{border:1px solid var(--line);border-radius:10px;background:var(--surface-2);overflow:hidden}
+.prompt-full>summary{cursor:pointer;list-style:none;padding:11px 13px;display:flex;align-items:center;gap:10px;font-size:12px;user-select:none}
+.prompt-full>summary::-webkit-details-marker{display:none}
+.prompt-full>summary::before{content:'›';color:var(--faint);transition:transform .15s;display:inline-block;font-size:15px;line-height:1}
+.prompt-full[open]>summary::before{transform:rotate(90deg)}
+.pf-label{font-size:10px;font-weight:750;letter-spacing:.05em;color:var(--soft);text-transform:uppercase;flex:0 0 auto}
+.pf-preview{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.prompt-full[open] .pf-preview{display:none}
+.prompt-full-text{padding:2px 13px 13px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--ink);max-height:300px;overflow:auto}
 .prompt-rail{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
 .prail-item{flex:0 0 220px;border:1px solid var(--line);background:var(--surface-2);border-radius:9px;padding:10px;cursor:pointer;transition:border-color .14s}
 .prail-item:hover,.prail-item.active{border-color:var(--focus)}
@@ -417,6 +426,7 @@ function renderDrawer(){const session=DATA.sessions.find(s=>s.sessionId===select
 document.getElementById('drawerContent').innerHTML=`
 <div class="drawer-head"><div><div class="drawer-title">${esc(session.title)}</div><div class="drawer-meta"><span>${esc(session.project)}</span>·<span class="badge">${esc(session.model)}</span>·<span>${fmt(session.totalTokens)} tokens</span>·<span>${fmt(session.promptCount)} prompts</span>${ctxPct!=null?`·<span>peak ctx ${ctxPct}%</span>`:''}</div></div><button class="iconbtn" onclick="closeDrawer()" title="Close">×</button></div>
 <div class="drawer-body">
+  <details class="prompt-full"><summary><span class="pf-label">Prompt</span><span class="pf-preview">${esc(p.prompt)}</span></summary><div class="prompt-full-text">${esc(p.prompt)||'<span class="muted">(continuation — no new prompt)</span>'}</div></details>
   <div><div class="muted" style="margin-bottom:8px;font-weight:700">Prompts in session (${session.promptBreakdown.length})</div><div class="prompt-rail">${session.promptBreakdown.map(pp=>`<div class="prail-item ${pp.rank===selectedPromptRank?'active':''}" onclick="selectPrompt(${pp.rank})"><div class="pt">${esc(pp.prompt)}</div><div class="muted" style="margin-top:5px;font-size:11px">${fmt(pp.totalTokens)} · ${fmt(pp.turnCount)} turns</div><div class="token-strip">${strip(pp)}</div></div>`).join('')}</div></div>
   ${p?promptDetail(p):''}
 </div>`;
