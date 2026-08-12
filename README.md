@@ -4,9 +4,9 @@
 
 <h1 align="center">claudalytics</h1>
 
-> Private fork of [metrascope](https://github.com/Buckibarnes17/metrascope) by
-> Keshav, rebranded for internal use. Not published to npm — run it straight
-> from this repo (see below). MIT licensed, original copyright retained in
+> Fork of [metrascope](https://github.com/Buckibarnes17/metrascope) by Keshav,
+> rebranded for internal use. Not published to npm — run it straight from this
+> repo (see below). MIT licensed, original copyright retained in
 > [LICENSE](./LICENSE).
 
 See where your coding-agent tokens go. One local command, no upload.
@@ -32,9 +32,9 @@ npx github:cpalkals/claudalytics
 npx github:cpalkals/claudalytics
 ```
 
-That's it — it opens a dashboard in your browser. You'll need `git` installed
-and access to this private repo (SSH key or GitHub auth on your machine),
-since npx clones it directly rather than pulling from the npm registry.
+That's it — it opens a dashboard in your browser. You'll just need `git`
+installed, since npx clones this repo directly rather than pulling from the
+npm registry. No GitHub auth needed — the repo is public.
 
 Or from a clone:
 
