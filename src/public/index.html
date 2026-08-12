@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Metrascope</title>
+<title>Claudalytics</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="alternate icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -55,6 +55,8 @@ h1{margin:0;font-size:18px;line-height:1.1;letter-spacing:-.01em}
 .kpi .value{margin-top:7px;font-size:25px;line-height:1;font-weight:780;letter-spacing:-.01em}
 .kpi .hint{margin-top:7px;color:var(--soft);font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ratebar{display:flex;align-items:center;gap:20px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow),var(--inset);padding:13px 18px;margin-bottom:20px}
+.rangebar{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:11px;box-shadow:var(--shadow),var(--inset);padding:10px 16px;margin-bottom:18px;flex-wrap:wrap}
+.rangebar-label{color:var(--faint);font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.08em;font-family:var(--mono)}
 .ratebar .plan{display:flex;align-items:center;gap:9px;padding-right:18px;border-right:1px solid var(--line)}
 .ratebar .plan .name{font-size:14px;font-weight:800;text-transform:capitalize}
 .rl{flex:1;min-width:200px;display:flex;flex-direction:column;gap:6px}
@@ -126,6 +128,15 @@ canvas{width:100%;max-width:100%;display:block}
 .wk-fill{height:100%;background:linear-gradient(90deg,var(--mauve),var(--brand));border-radius:inherit}
 /* sessions table */
 .table-card{overflow:hidden}
+.table-scroll{overflow-x:hidden}
+.table-scroll table{min-width:840px}
+.table-scroll-top{overflow-x:auto;overflow-y:hidden;height:14px;border-bottom:1px solid var(--line)}
+.table-scroll-top>div{height:1px}
+.table-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.table-pager .pager-controls{display:flex;align-items:center;gap:10px}
+.table-pager select{border:1px solid var(--line);background:var(--surface-2);color:var(--ink);border-radius:7px;padding:5px 8px;font-size:12px}
+.table-pager .btn{padding:6px 11px}
+.table-pager .btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
 .table-top{display:flex;align-items:center;justify-content:space-between;padding:15px 18px;gap:12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .table-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -246,7 +257,7 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 </style>
 </head>
 <body>
-<div id="app" class="loading">Loading Metrascope&hellip;</div>
+<div id="app" class="loading">Loading Claudalytics&hellip;</div>
 <div class="scrim" id="scrim" onclick="closeDrawer()"></div>
 <div class="chart-tip" id="chartTip"></div>
 <aside class="drawer" id="drawer" aria-hidden="true"><div id="drawerContent"></div></aside>
@@ -264,9 +275,12 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 <script>
 let DATA=null, SOURCES=[], sourceId=localStorage.getItem('codex-spend-source')||null;
 let sort={key:'updatedTimestamp',dir:'desc'}, query='', modelFilter='';
+let page=1, pageSize=(()=>{const v=localStorage.getItem('metrascope-page-size');return v==='all'?'all':(Number(v)||25)})();
+let autoRefreshMs=Number(localStorage.getItem('metrascope-auto-refresh'))||0, autoTimer=null;
 let activeTab=localStorage.getItem('codex-spend-tab')||'overview';
 let selectedSessionId=null, selectedPromptRank=null, rlTimer=null;
 let theme=localStorage.getItem('codex-spend-theme')||'dark';
+let range=localStorage.getItem('metrascope-range')||'all';
 document.documentElement.dataset.theme=theme;
 const caps=()=>DATA&&DATA.capabilities||{};
 const cssVar=name=>getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -285,11 +299,12 @@ async function loadSources(){
     if(!sourceId||!SOURCES.find(s=>s.id===sourceId&&s.available))sourceId=(avail.find(s=>s.id===j.default)||avail[0]||SOURCES[0]||{id:'codex'}).id;
   }catch{SOURCES=[]}
 }
-function setSource(id){if(id===sourceId)return;sourceId=id;localStorage.setItem('codex-spend-source',id);selectedSessionId=null;selectedPromptRank=null;query='';modelFilter='';closeDrawer();const app=document.getElementById('app');app.className='loading';app.textContent='Loading '+id+' usage…';fetchData().catch(showErr)}
+function setSource(id){if(id===sourceId)return;sourceId=id;localStorage.setItem('codex-spend-source',id);selectedSessionId=null;selectedPromptRank=null;query='';modelFilter='';page=1;closeDrawer();const app=document.getElementById('app');app.className='loading';app.textContent='Loading '+id+' usage…';fetchData().catch(showErr)}
+function setRange(r){if(r===range)return;range=r;localStorage.setItem('metrascope-range',r);selectedSessionId=null;selectedPromptRank=null;query='';modelFilter='';page=1;closeDrawer();const app=document.getElementById('app');app.className='loading';app.textContent='Loading '+RANGE_LABEL[r]+'…';fetchData().catch(showErr)}
 function applyAccent(hex){if(!hex)return;const c=hex.replace('#','');const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);const lum=(0.299*r+0.587*g+0.114*b)/255;const fg=lum>0.6?'#1a1306':'#ffffff';const hover=`rgb(${Math.min(255,r+18)},${Math.min(255,g+18)},${Math.min(255,b+18)})`;const root=document.documentElement.style;root.setProperty('--brand',hex);root.setProperty('--brand-hover',hover);root.setProperty('--brand-fg',fg);root.setProperty('--focus',hex)}
 
 async function fetchData(refresh=false){
-  const qs='?source='+encodeURIComponent(sourceId);
+  const qs='?source='+encodeURIComponent(sourceId)+'&range='+encodeURIComponent(range);
   const res=await fetch((refresh?'/api/refresh':'/api/data')+qs);
   if(!res.ok)throw new Error((await res.json()).error||'Failed to load data');
   if(refresh){DATA=await(await fetch('/api/data'+qs)).json();for(const k in contentCache)delete contentCache[k]}else DATA=await res.json();
@@ -302,10 +317,11 @@ function render(){
   const t=DATA.totals, app=document.getElementById('app'), src=DATA.source||{}, c=caps();
   app.className='wrap';
   app.innerHTML=`
-<header class="anim"><div class="brand"><img class="logo" src="/favicon.svg" alt="Metrascope" width="38" height="38"><div><h1>Metrascope</h1><div class="sub" title="${esc(src.home||'')}">${esc(src.label||'')} · ${esc(src.home||'')}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div></header>
+<header class="anim"><div class="brand"><img class="logo" src="/favicon.svg" alt="Claudalytics" width="38" height="38"><div><h1>Claudalytics</h1><div class="sub" title="${esc(src.home||'')}">${esc(src.label||'')} · ${esc(src.home||'')}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn" onclick="cycleAutoRefresh()" title="Auto-refresh cadence">${autoRefreshMs?'⏱ Auto '+(autoRefreshMs/1000)+'s':'⏱ Auto Off'}</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div></header>
 ${agentBar()}
+${rangeBar()}
 ${DATA.warnings?.length?`<div class="warnbox anim">${DATA.warnings.map(w=>esc(w.message)).join('<br>')}</div>`:''}
-${!DATA.sessions.length?`<div class="card empty anim">No ${esc(src.label||'agent')} sessions with token usage found.<div class="muted" style="margin-top:8px">${esc(src.home||'')}</div></div>`:`
+${!DATA.sessions.length?`<div class="card empty anim">No ${esc(src.label||'agent')} sessions with token usage found${range!=='all'?' for '+esc(RANGE_LABEL[range].toLowerCase()):''}.<div class="muted" style="margin-top:8px">${esc(src.home||'')}</div></div>`:`
 <div class="summary anim">${kpiStrip(t,c)}</div>
 <div class="tabs anim">
   ${tabBtn('overview','Overview')}${tabBtn('sessions','Sessions')}${tabBtn('prompts','Prompts')}${tabBtn('insights',`Insights · ${DATA.insights.length}`)}
@@ -315,17 +331,21 @@ ${!DATA.sessions.length?`<div class="card empty anim">No ${esc(src.label||'agent
 }
 
 function agentBar(){if(!SOURCES.length)return'';return`<div class="agentbar anim">${SOURCES.map(s=>`<button class="agent ${s.id===sourceId?'on':''}" ${s.available?'':'disabled'} title="${s.available?esc(s.home):'not detected on this machine'}" onclick="setSource('${s.id}')"><span class="amark" style="background:${s.available?s.accent:'var(--surface-3)'};color:${s.available?accentFg(s.accent):'var(--faint)'}">${esc(s.mark)}</span>${esc(s.label)}${s.available?'':' <span class="muted" style="font-size:10px">·n/a</span>'}</button>`).join('')}</div>`}
+function rangeBar(){return`<div class="rangebar anim"><span class="rangebar-label">Range</span><div class="chips">${['day','week','month','all'].map(r=>`<span class="chip ${range===r?'on':''}" onclick="setRange('${r}')">${esc(RANGE_LABEL[r])}</span>`).join('')}</div></div>`}
 function accentFg(hex){if(!hex)return'#fff';const c=hex.replace('#','');const lum=(0.299*parseInt(c.slice(0,2),16)+0.587*parseInt(c.slice(2,4),16)+0.114*parseInt(c.slice(4,6),16))/255;return lum>0.6?'#1a1306':'#fff'}
 function kpiStrip(t,c){const cachePct=t.totalTokens?Math.round(t.cachedInputTokens/t.totalTokens*100):0;const reasonPct=t.outputTokens?Math.round(t.reasoningOutputTokens/t.outputTokens*100):0;
   let third;
   if(c.reasoning)third=kpi('Reasoning',fmt(t.reasoningOutputTokens),`${reasonPct}% of output`);
-  else if(c.cost)third=kpi('Est. Cost',(t.totalCost>=1000?'$'+(t.totalCost/1000).toFixed(1)+'K':'$'+t.totalCost.toFixed(2)),'API-rate estimate');
+  else if(c.cost)third=costKpi(t);
   else third=kpi('Output',fmt(t.outputTokens),`${t.totalTokens?Math.round(t.outputTokens/t.totalTokens*100):0}% of tokens`);
   return kpi('Total Tokens',fmt(t.totalTokens),`${fmt(t.inputTokens)} in · ${fmt(t.outputTokens)} out`)
     +kpi('Cached Input',fmt(t.cachedInputTokens),`${cachePct}% of all tokens`)
     +third
     +kpi('Sessions',fmt(t.totalSessions),`${fmt(t.totalPrompts)} prompts · ${fmt(t.totalToolCalls)} tools`)}
 function kpi(label,value,hint){return`<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="hint">${esc(hint)}</div></div>`}
+const RANGE_LABEL={day:'Today',week:'Last 7 days',month:'Last 30 days',all:'All time'};
+function costKpi(t){const cost=t.totalCost||0;const value=cost>=1000?'$'+(cost/1000).toFixed(1)+'K':'$'+cost.toFixed(2);
+  return`<div class="kpi"><div class="label">Est. Cost</div><div class="value">${value}</div><div class="hint">${esc(RANGE_LABEL[range])} · API-rate estimate</div></div>`}
 function showErr(err){const app=document.getElementById('app');app.className='wrap';app.innerHTML=`<div class="card empty">${esc(err.message||err)}</div>`}
 function tabBtn(id,label){return`<button class="tab ${activeTab===id?'on':''}" onclick="setTab('${id}')">${label}</button>`}
 function setTab(id){activeTab=id;localStorage.setItem('codex-spend-tab',id);document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick').includes("'"+id+"'")));renderView()}
@@ -359,7 +379,9 @@ function legend(){return`<span><i class="dot" style="background:var(--blue)"></i
 function sessionsView(){return`
 <section class="card table-card">
   <div class="table-top"><div><h2>Sessions</h2><div class="muted">${DATA.sessions.length} parsed · click a row to inspect</div></div><div class="table-tools"><div class="chips">${modelChips()}</div><input id="search" class="search" placeholder="Search sessions…" value="${esc(query)}"></div></div>
-  <table><thead><tr>
+  <div class="table-pager" id="sessionsPager"></div>
+  <div class="table-scroll-top" id="tblScrollTop"><div id="tblScrollTopInner"></div></div>
+  <div class="table-scroll" id="tblScroll"><table><thead><tr>
     <th data-sort="updatedTimestamp">Updated${arrow('updatedTimestamp')}</th>
     <th data-sort="title">Session${arrow('title')}</th>
     <th data-sort="project">Project${arrow('project')}</th>
@@ -368,14 +390,19 @@ function sessionsView(){return`
     <th class="num" data-sort="promptCount">Prompts${arrow('promptCount')}</th>
     <th class="num" data-sort="turnCount">Turns${arrow('turnCount')}</th>
     <th class="num" data-sort="toolCount">Tools${arrow('toolCount')}</th>
-  </tr></thead><tbody id="sessionsBody"></tbody></table>
+  </tr></thead><tbody id="sessionsBody"></tbody></table></div>
 </section>`}
 function arrow(key){return sort.key===key?`<span class="ar">${sort.dir==='desc'?'▾':'▴'}</span>`:''}
 function modelChips(){const models=DATA.modelBreakdown.map(m=>m.model);return [`<span class="chip ${modelFilter===''?'on':''}" onclick="setModel('')">All</span>`].concat(models.map(m=>`<span class="chip ${modelFilter===m?'on':''}" onclick="setModel('${q1(esc(m))}')">${esc(m)}</span>`)).join('')}
-function setModel(m){modelFilter=m;renderView()}
-function wireSessions(){renderRows();document.querySelectorAll('th[data-sort]').forEach(th=>{th.onclick=()=>{const key=th.dataset.sort;sort={key,dir:sort.key===key&&sort.dir==='desc'?'asc':'desc'};renderView()}});const sb=document.getElementById('search');if(sb)sb.oninput=e=>{query=e.target.value;renderRows()}}
-function renderRows(){const tbody=document.getElementById('sessionsBody');if(!tbody)return;let rows=[...DATA.sessions];if(modelFilter)rows=rows.filter(s=>s.model===modelFilter);if(query.trim()){const qq=query.toLowerCase();rows=rows.filter(s=>(s.title||'').toLowerCase().includes(qq)||(s.project||'').toLowerCase().includes(qq)||(s.model||'').toLowerCase().includes(qq))}rows.sort((a,b)=>{const av=a[sort.key]??'',bv=b[sort.key]??'';const cmp=typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv));return sort.dir==='desc'?-cmp:cmp});tbody.innerHTML=rows.length?rows.map(s=>`<tr class="${s.sessionId===selectedSessionId?'selected':''}" onclick="openSession('${s.sessionId}')"><td>${dateFmt(s.updatedTimestamp||s.timestamp)}<div class="muted">${s.archived?'archived':'active'}</div></td><td><div class="title" title="${esc(s.title)}">${esc(s.title)}</div><div class="muted">${esc(s.sessionId).slice(0,18)}…</div></td><td>${esc(s.project)}</td><td><span class="badge">${esc(s.model)}</span></td><td class="num">${fmt(s.totalTokens)}</td><td class="num">${fmt(s.promptCount)}</td><td class="num">${fmt(s.turnCount)}</td><td class="num">${fmt(s.toolCount)}</td></tr>`).join(''):'<tr><td colspan="8" class="empty">No sessions match this filter.</td></tr>'}
-function openProject(project){query=project;modelFilter='';setTab('sessions')}
+function setModel(m){modelFilter=m;page=1;renderView()}
+function wireSessions(){renderRows();syncTableScroll();document.querySelectorAll('th[data-sort]').forEach(th=>{th.onclick=()=>{const key=th.dataset.sort;sort={key,dir:sort.key===key&&sort.dir==='desc'?'asc':'desc'};page=1;renderRows()}});const sb=document.getElementById('search');if(sb)sb.oninput=e=>{query=e.target.value;page=1;renderRows()}}
+function filteredSortedSessions(){let rows=[...DATA.sessions];if(modelFilter)rows=rows.filter(s=>s.model===modelFilter);if(query.trim()){const qq=query.toLowerCase();rows=rows.filter(s=>(s.title||'').toLowerCase().includes(qq)||(s.project||'').toLowerCase().includes(qq)||(s.model||'').toLowerCase().includes(qq))}rows.sort((a,b)=>{const av=a[sort.key]??'',bv=b[sort.key]??'';const cmp=typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv));return sort.dir==='desc'?-cmp:cmp});return rows}
+function renderRows(){const tbody=document.getElementById('sessionsBody');if(!tbody)return;const all=filteredSortedSessions();const size=pageSize==='all'?Math.max(all.length,1):pageSize;const totalPages=Math.max(1,Math.ceil(all.length/size));if(page>totalPages)page=totalPages;if(page<1)page=1;const start=(page-1)*size;const rows=pageSize==='all'?all:all.slice(start,start+size);tbody.innerHTML=rows.length?rows.map(s=>`<tr class="${s.sessionId===selectedSessionId?'selected':''}" onclick="openSession('${s.sessionId}')"><td>${dateFmt(s.updatedTimestamp||s.timestamp)}<div class="muted">${s.archived?'archived':'active'}</div></td><td><div class="title" title="${esc(s.title)}">${esc(s.title)}</div><div class="muted">${esc(s.sessionId).slice(0,18)}…</div></td><td>${esc(s.project)}</td><td><span class="badge">${esc(s.model)}</span></td><td class="num">${fmt(s.totalTokens)}</td><td class="num">${fmt(s.promptCount)}</td><td class="num">${fmt(s.turnCount)}</td><td class="num">${fmt(s.toolCount)}</td></tr>`).join(''):'<tr><td colspan="8" class="empty">No sessions match this filter.</td></tr>';renderPager(all.length,totalPages,size);syncTableScroll()}
+function renderPager(total,totalPages,size){const pager=document.getElementById('sessionsPager');if(!pager)return;const start=total?(page-1)*size+1:0;const end=Math.min(total,page*size);pager.innerHTML=`<div class="muted">${total?`Showing ${start}–${end} of ${total}`:'No results'}</div><div class="pager-controls"><label class="muted" style="display:flex;align-items:center;gap:6px">Rows<select id="pageSizeSel">${[25,50,100].map(n=>`<option value="${n}" ${pageSize===n?'selected':''}>${n}</option>`).join('')}<option value="all" ${pageSize==='all'?'selected':''}>All</option></select></label><button class="btn" ${page<=1?'disabled':''} onclick="gotoPage(${page-1})">‹ Prev</button><span class="muted">Page ${page} / ${totalPages}</span><button class="btn" ${page>=totalPages?'disabled':''} onclick="gotoPage(${page+1})">Next ›</button></div>`;const sel=document.getElementById('pageSizeSel');if(sel)sel.onchange=e=>setPageSize(e.target.value)}
+function gotoPage(n){page=n;renderRows()}
+function setPageSize(v){pageSize=v==='all'?'all':Number(v);localStorage.setItem('metrascope-page-size',pageSize);page=1;renderRows()}
+function syncTableScroll(){const top=document.getElementById('tblScrollTop'),bottom=document.getElementById('tblScroll'),inner=document.getElementById('tblScrollTopInner');if(!top||!bottom||!inner)return;const table=bottom.querySelector('table');if(table)inner.style.width=table.scrollWidth+'px';if(top.dataset.wired)return;top.dataset.wired='1';let syncing=false;top.addEventListener('scroll',()=>{if(syncing)return;syncing=true;bottom.scrollLeft=top.scrollLeft;syncing=false});bottom.addEventListener('scroll',()=>{if(syncing)return;syncing=true;top.scrollLeft=bottom.scrollLeft;syncing=false})}
+function openProject(project){query=project;modelFilter='';page=1;setTab('sessions')}
 
 /* ===== PROMPTS ===== */
 function promptsView(){const items=DATA.topPrompts.slice(0,25);if(!items.length)return'<div class="card empty">No prompt data yet.</div>';const max=Math.max(...items.map(i=>i.totalTokens||0),1);return`<section class="card section"><div class="section-head"><h2>Most Expensive Prompts</h2><span class="muted">top ${items.length} · click to drill in</span></div><div class="plist">${items.map((p,i)=>`<div class="prow" onclick="openSession('${p.sessionId}',${promptRankForTop(p)})"><div class="rk">${i+1}</div><div><div class="pt" title="${esc(p.prompt)}">${esc(p.prompt)}</div><div class="muted" style="margin-top:3px">${esc(p.project)} · ${fmt(p.turnCount)} turns · ${toolText(p.tools)}</div><div class="token-strip" style="width:${Math.max(14,(p.totalTokens/max)*100)}%">${strip(p)}</div></div><div class="num">${fmt(p.totalTokens)}<div class="muted" style="font-weight:600">tokens</div></div></div>`).join('')}</div></section>`}
@@ -473,16 +500,18 @@ const cachePct=t.totalTokens?Math.round(t.cachedInputTokens/t.totalTokens*100):0
 const fourth=C.reasoning?{l:'REASONING TOKENS',v:fmt(t.reasoningOutputTokens)}:C.cost?{l:'EST. COST',v:t.totalCost>=1000?'$'+(t.totalCost/1000).toFixed(1)+'K':'$'+t.totalCost.toFixed(2)}:{l:'OUTPUT TOKENS',v:fmt(t.outputTokens)};
 const cards=[{l:'TOTAL TOKENS',v:fmt(t.totalTokens)},{l:'SESSIONS',v:fmt(t.totalSessions)},{l:'CACHED INPUT',v:cachePct+'%'},fourth];
 const gy=232,cw=(W-120-40)/2,chH=158;cards.forEach((s,i)=>{const col=i%2,row=Math.floor(i/2),x=60+col*(cw+40),y=gy+row*(chH+20);ctx.fillStyle='rgba(255,255,255,.05)';roundRect(ctx,x,y,cw,chH,16);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=1;roundRect(ctx,x,y,cw,chH,16);ctx.stroke();ctx.fillStyle='#888a92';ctx.font='600 14px Inter,system-ui';ctx.fillText(s.l,x+24,y+38);ctx.fillStyle='#e3e2df';ctx.font='800 46px Inter,system-ui';ctx.fillText(s.v,x+24,y+102);});
-ctx.fillStyle='#888a92';ctx.font='600 16px Inter,system-ui';ctx.fillText('codex-spend',60,H-40);ctx.textAlign='right';ctx.fillStyle='#5d6068';ctx.font='500 15px Inter,system-ui';ctx.fillText('npx codex-spend',W-60,H-40);ctx.textAlign='left';
+ctx.fillStyle='#888a92';ctx.font='600 16px Inter,system-ui';ctx.fillText('claudalytics',60,H-40);ctx.textAlign='right';ctx.fillStyle='#5d6068';ctx.font='500 15px Inter,system-ui';ctx.fillText('npx github:cpalkals/claudalytics',W-60,H-40);ctx.textAlign='left';
 document.getElementById('shareOverlay').classList.add('open');}
 function closeShare(){document.getElementById('shareOverlay').classList.remove('open')}
-function downloadShare(){const c=document.getElementById('shareCanvas'),a=document.createElement('a');a.download='codex-spend.png';a.href=c.toDataURL('image/png');a.click()}
+function downloadShare(){const c=document.getElementById('shareCanvas'),a=document.createElement('a');a.download='claudalytics.png';a.href=c.toDataURL('image/png');a.click()}
 
 async function refresh(){const b=document.querySelector('.btn.primary');if(b)b.textContent='Refreshing…';await fetchData(true)}
+function cycleAutoRefresh(){const opts=[0,15000,30000,60000,300000];autoRefreshMs=opts[(opts.indexOf(autoRefreshMs)+1)%opts.length];localStorage.setItem('metrascope-auto-refresh',autoRefreshMs);setupAutoRefresh();if(DATA)render()}
+function setupAutoRefresh(){if(autoTimer){clearInterval(autoTimer);autoTimer=null}if(!autoRefreshMs)return;autoTimer=setInterval(()=>{const sb=document.getElementById('search');if(sb&&document.activeElement===sb)return;if(document.getElementById('drawer').classList.contains('open'))return;if(document.getElementById('shareOverlay').classList.contains('open'))return;fetchData(true).catch(()=>{})},autoRefreshMs)}
 window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeShare();closeDrawer()}});
 window.addEventListener('resize',()=>{if(!DATA||!DATA.sessions.length)return;if(activeTab==='overview'){drawDailyChart();drawModelChart()}if(document.getElementById('drawer').classList.contains('open')){const s=DATA.sessions.find(x=>x.sessionId===selectedSessionId);const p=s?.promptBreakdown.find(x=>x.rank===selectedPromptRank);if(p)drawTurnChart(p)}});
-window.addEventListener('error',(e)=>console.error('[metrascope] runtime error:',e.message,'@',e.filename+':'+e.lineno));
-(async()=>{await loadSources();await fetchData();console.log('%c[metrascope] UI loaded — inline prompt block build','color:#d4a44a;font-weight:bold')})().catch((e)=>{console.error('[metrascope] boot failed:',e);showErr(e)});
+window.addEventListener('error',(e)=>console.error('[claudalytics] runtime error:',e.message,'@',e.filename+':'+e.lineno));
+(async()=>{await loadSources();await fetchData();setupAutoRefresh();console.log('%c[claudalytics] UI loaded — inline prompt block build','color:#d4a44a;font-weight:bold')})().catch((e)=>{console.error('[claudalytics] boot failed:',e);showErr(e)});
 </script>
 </body>
 </html>

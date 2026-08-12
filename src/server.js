@@ -1,10 +1,23 @@
 const express = require('express');
 const path = require('path');
 const registry = require('./adapters');
+const { buildResult } = require('./adapters/aggregate');
+
+const RANGE_DAYS = { day: 0, week: 6, month: 29 };
+
+function scopeToRange(full, range) {
+  if (!range || range === 'all' || !(range in RANGE_DAYS)) return full;
+  const start = new Date();
+  start.setDate(start.getDate() - RANGE_DAYS[range]);
+  const startStr = start.toISOString().slice(0, 10);
+  const filtered = full.sessions.filter((s) => s.date && s.date >= startStr);
+  if (filtered.length === full.sessions.length) return full;
+  return buildResult(filtered, full.source, full.capabilities, full.warnings);
+}
 
 function createServer(options = {}) {
   const app = express();
-  const cache = {}; // sourceId -> parsed result
+  const cache = {}; // sourceId -> parsed result (always unfiltered / "all")
 
   function friendlyError(err) {
     if (err.code === 'ENOENT') return { error: 'Agent data directory not found.', code: err.code };
@@ -34,7 +47,7 @@ function createServer(options = {}) {
     const sourceId = resolveSourceId(req);
     try {
       if (!cache[sourceId]) cache[sourceId] = await readSource(sourceId);
-      res.json(cache[sourceId]);
+      res.json(scopeToRange(cache[sourceId], req.query.range));
     } catch (err) {
       res.status(500).json(friendlyError(err));
     }
