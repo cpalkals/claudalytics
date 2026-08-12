@@ -20,7 +20,7 @@ npx github:cpalkals/claudalytics
 
 | Agent | Reads | Tokens | Reasoning | Cache | Est. cost | Rate limit |
 |---|---|---|---|---|---|---|
-| **Codex** | `~/.codex` sessions | ✓ | ✓ | ✓ | — | ✓ |
+| **Codex** | `~/.codex` sessions | ✓ | ✓ | ✓ | ✓ | ✓ |
 | **Claude Code** | `~/.claude/projects` | ✓ | — | ✓ | ✓ | — |
 | **Qwen Code** | `~/.qwen/projects/**/chats` | ✓ | ✓ | ✓ | — | — |
 | **OpenCode** | `~/.local/share/opencode/opencode.db` (SQLite) | ✓ | ✓ | ✓ | ✓ | — |
@@ -82,8 +82,8 @@ To add an agent, drop a new adapter module in `src/adapters/`, register it in
 - **Agent switcher** — segmented control of detected agents; per-agent accent/branding.
 - **Range filter** — Today / Last 7 days / Last 30 days / All time, applied globally
   to every KPI, chart, session, prompt, and insight — not just cost.
-- **KPI strip** — total / cached tokens, sessions, and an adaptive third stat
-  (reasoning, est. cost, or output depending on the agent).
+- **KPI strip** — total / cached tokens, sessions, and adaptive stats for whatever
+  the agent supports (reasoning and/or est. cost, falling back to output share).
 - **Rate-limit panel** (Codex) — live 5-hour and weekly window usage with reset countdowns.
 - **Overview** — daily stacked-token chart, model-share donut, top projects, weekday, tools (all hover-interactive).
 - **Sessions** — sortable, searchable, model-filterable, paginated table (25/50/100/all rows per page); click a row for a drilldown drawer.
@@ -97,6 +97,7 @@ To add an agent, drop a new adapter module in `src/adapters/`, register it in
 ## Notes
 
 Token events expose usage (and, for Codex, rate-limit pressure), not a reliable
-per-token invoice. Costs shown for Claude Code are **API-rate estimates**, not
-your subscription bill. Reasoning tokens are reported as a subset of output
+per-token invoice. Costs shown for Claude Code and Codex are **API-rate
+estimates**, not your subscription bill — most Codex CLI usage is billed
+against a ChatGPT plan rather than metered per-token. Reasoning tokens are reported as a subset of output
 tokens (`total = input + output`).

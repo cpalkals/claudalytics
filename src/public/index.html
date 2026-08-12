@@ -31,6 +31,7 @@ body{margin:0;font-family:var(--font);color:var(--ink);background:linear-gradien
 button,input{font:inherit}
 .wrap{width:min(1160px,calc(100% - 40px));margin:0 auto;padding:22px 0 72px}
 .loading{min-height:70vh;display:grid;place-items:center;color:var(--muted);font-weight:700}
+.busy{opacity:.55;pointer-events:none;transition:opacity .15s ease}
 @keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 .anim{animation:up .4s cubic-bezier(.2,0,.2,1) both}
@@ -49,7 +50,7 @@ h1{margin:0;font-size:18px;line-height:1.1;letter-spacing:-.01em}
 .btn.primary{background:var(--brand);color:var(--brand-fg);border-color:transparent}
 .btn.primary:hover{background:var(--brand-hover)}
 /* summary band: KPIs + rate */
-.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow),var(--inset);margin-bottom:14px}
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow),var(--inset);margin-bottom:14px}
 .kpi{background:var(--surface);padding:16px 18px}
 .kpi .label{color:var(--faint);font-size:10px;font-weight:750;text-transform:uppercase;letter-spacing:.08em;font-family:var(--mono)}
 .kpi .value{margin-top:7px;font-size:25px;line-height:1;font-weight:780;letter-spacing:-.01em}
@@ -299,48 +300,83 @@ async function loadSources(){
     if(!sourceId||!SOURCES.find(s=>s.id===sourceId&&s.available))sourceId=(avail.find(s=>s.id===j.default)||avail[0]||SOURCES[0]||{id:'codex'}).id;
   }catch{SOURCES=[]}
 }
-function setSource(id){if(id===sourceId)return;sourceId=id;localStorage.setItem('codex-spend-source',id);selectedSessionId=null;selectedPromptRank=null;query='';modelFilter='';page=1;closeDrawer();const app=document.getElementById('app');app.className='loading';app.textContent='Loading '+id+' usage…';fetchData().catch(showErr)}
-function setRange(r){if(r===range)return;range=r;localStorage.setItem('metrascope-range',r);selectedSessionId=null;selectedPromptRank=null;query='';modelFilter='';page=1;closeDrawer();const app=document.getElementById('app');app.className='loading';app.textContent='Loading '+RANGE_LABEL[r]+'…';fetchData().catch(showErr)}
+// Disables real <button> elements (not just pointer-events) so a focused control
+// can't be Tab+Enter'd into firing a second overlapping request while one is in flight.
+function setBusy(on){const app=document.getElementById('app');app.classList.toggle('busy',on);app.querySelectorAll('button').forEach(b=>{b.disabled=on})}
+function setSource(id){if(id===sourceId)return;sourceId=id;localStorage.setItem('codex-spend-source',id);selectedSessionId=null;selectedPromptRank=null;query='';modelFilter='';page=1;closeDrawer();setBusy(true);fetchData()}
+function setRange(r){if(r===range)return;range=r;localStorage.setItem('metrascope-range',r);selectedSessionId=null;selectedPromptRank=null;query='';modelFilter='';page=1;closeDrawer();setBusy(true);fetchData()}
 function applyAccent(hex){if(!hex)return;const c=hex.replace('#','');const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);const lum=(0.299*r+0.587*g+0.114*b)/255;const fg=lum>0.6?'#1a1306':'#ffffff';const hover=`rgb(${Math.min(255,r+18)},${Math.min(255,g+18)},${Math.min(255,b+18)})`;const root=document.documentElement.style;root.setProperty('--brand',hex);root.setProperty('--brand-hover',hover);root.setProperty('--brand-fg',fg);root.setProperty('--focus',hex)}
 
+// Every call gets a sequence number; if a newer call has started by the time this
+// one resolves, its response is dropped so a stale request can never overwrite
+// the data for whatever source/range is currently selected.
+let requestSeq=0;
 async function fetchData(refresh=false){
-  const qs='?source='+encodeURIComponent(sourceId)+'&range='+encodeURIComponent(range);
-  const res=await fetch((refresh?'/api/refresh':'/api/data')+qs);
-  if(!res.ok)throw new Error((await res.json()).error||'Failed to load data');
-  if(refresh){DATA=await(await fetch('/api/data'+qs)).json();for(const k in contentCache)delete contentCache[k]}else DATA=await res.json();
-  if(DATA.source)applyAccent(DATA.source.accent);
-  if(!selectedSessionId&&DATA.sessions[0])selectedSessionId=DATA.sessions[0].sessionId;
-  render();
+  const seq=++requestSeq;
+  try{
+    const qs='?source='+encodeURIComponent(sourceId)+'&range='+encodeURIComponent(range);
+    const res=await fetch((refresh?'/api/refresh':'/api/data')+qs);
+    if(!res.ok)throw new Error((await res.json()).error||'Failed to load data');
+    const data=refresh?await(await fetch('/api/data'+qs)).json():await res.json();
+    if(seq!==requestSeq)return;
+    DATA=data;
+    if(refresh)for(const k in contentCache)delete contentCache[k];
+    if(DATA.source)applyAccent(DATA.source.accent);
+    if(!selectedSessionId&&DATA.sessions[0])selectedSessionId=DATA.sessions[0].sessionId;
+    render();
+  }catch(err){
+    if(seq!==requestSeq)return;
+    showErr(err);
+  }finally{
+    if(seq===requestSeq)setBusy(false);
+  }
 }
 
+function headerInner(t,src){return`<div class="brand"><img class="logo" src="/favicon.svg" alt="Claudalytics" width="38" height="38"><div><h1>Claudalytics</h1><div class="sub" title="${esc(src.home||'')}">${esc(src.label||'')} · ${esc(src.home||'')}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn" onclick="cycleAutoRefresh()" title="Auto-refresh cadence">${autoRefreshMs?'⏱ Auto '+(autoRefreshMs/1000)+'s':'⏱ Auto Off'}</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div>`}
+// Shell (header/agentbar/rangebar/tabs) is built once and left in the DOM; every
+// subsequent render only patches each wrapper's innerHTML in place, so their .anim
+// entrance animation never replays and range/source/auto-refresh updates don't flash.
 function render(){
   const t=DATA.totals, app=document.getElementById('app'), src=DATA.source||{}, c=caps();
-  app.className='wrap';
-  app.innerHTML=`
-<header class="anim"><div class="brand"><img class="logo" src="/favicon.svg" alt="Claudalytics" width="38" height="38"><div><h1>Claudalytics</h1><div class="sub" title="${esc(src.home||'')}">${esc(src.label||'')} · ${esc(src.home||'')}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn" onclick="cycleAutoRefresh()" title="Auto-refresh cadence">${autoRefreshMs?'⏱ Auto '+(autoRefreshMs/1000)+'s':'⏱ Auto Off'}</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div></header>
-${agentBar()}
-${rangeBar()}
-${DATA.warnings?.length?`<div class="warnbox anim">${DATA.warnings.map(w=>esc(w.message)).join('<br>')}</div>`:''}
-${!DATA.sessions.length?`<div class="card empty anim">No ${esc(src.label||'agent')} sessions with token usage found${range!=='all'?' for '+esc(RANGE_LABEL[range].toLowerCase()):''}.<div class="muted" style="margin-top:8px">${esc(src.home||'')}</div></div>`:`
-<div class="summary anim">${kpiStrip(t,c)}</div>
-<div class="tabs anim">
-  ${tabBtn('overview','Overview')}${tabBtn('sessions','Sessions')}${tabBtn('prompts','Prompts')}${tabBtn('insights',`Insights · ${DATA.insights.length}`)}
-</div>
-<div id="view" class="view"></div>`}`;
-  if(DATA.sessions.length){renderView()}
+  if(!document.getElementById('headerBar')){
+    app.className='wrap';
+    app.innerHTML=`
+<header class="anim" id="headerBar"></header>
+<div class="agentbar anim" id="agentBarWrap"></div>
+<div class="rangebar anim" id="rangeBarWrap"></div>
+<div id="warnWrap"></div>
+<div id="emptyWrap"></div>
+<div class="summary anim" id="summaryWrap"></div>
+<div class="tabs anim" id="tabsWrap"></div>
+<div id="view" class="view"></div>`;
+  }
+  document.getElementById('headerBar').innerHTML=headerInner(t,src);
+  const agentBarWrap=document.getElementById('agentBarWrap');agentBarWrap.innerHTML=agentBarInner();agentBarWrap.style.display=SOURCES.length?'':'none';
+  document.getElementById('rangeBarWrap').innerHTML=rangeBarInner();
+  document.getElementById('warnWrap').innerHTML=DATA.warnings?.length?`<div class="warnbox">${DATA.warnings.map(w=>esc(w.message)).join('<br>')}</div>`:'';
+  const summaryWrap=document.getElementById('summaryWrap'),tabsWrap=document.getElementById('tabsWrap'),view=document.getElementById('view'),emptyWrap=document.getElementById('emptyWrap');
+  if(!DATA.sessions.length){
+    emptyWrap.innerHTML=`<div class="card empty anim">No ${esc(src.label||'agent')} sessions with token usage found${range!=='all'?' for '+esc(RANGE_LABEL[range].toLowerCase()):''}.<div class="muted" style="margin-top:8px">${esc(src.home||'')}</div></div>`;
+    summaryWrap.innerHTML='';tabsWrap.innerHTML='';view.innerHTML='';
+  } else {
+    emptyWrap.innerHTML='';
+    summaryWrap.innerHTML=kpiStrip(t,c);
+    tabsWrap.innerHTML=`${tabBtn('overview','Overview')}${tabBtn('sessions','Sessions')}${tabBtn('prompts','Prompts')}${tabBtn('insights',`Insights · ${DATA.insights.length}`)}`;
+    renderView();
+  }
 }
 
-function agentBar(){if(!SOURCES.length)return'';return`<div class="agentbar anim">${SOURCES.map(s=>`<button class="agent ${s.id===sourceId?'on':''}" ${s.available?'':'disabled'} title="${s.available?esc(s.home):'not detected on this machine'}" onclick="setSource('${s.id}')"><span class="amark" style="background:${s.available?s.accent:'var(--surface-3)'};color:${s.available?accentFg(s.accent):'var(--faint)'}">${esc(s.mark)}</span>${esc(s.label)}${s.available?'':' <span class="muted" style="font-size:10px">·n/a</span>'}</button>`).join('')}</div>`}
-function rangeBar(){return`<div class="rangebar anim"><span class="rangebar-label">Range</span><div class="chips">${['day','week','month','all'].map(r=>`<span class="chip ${range===r?'on':''}" onclick="setRange('${r}')">${esc(RANGE_LABEL[r])}</span>`).join('')}</div></div>`}
+function agentBarInner(){if(!SOURCES.length)return'';return SOURCES.map(s=>`<button class="agent ${s.id===sourceId?'on':''}" ${s.available?'':'disabled'} title="${s.available?esc(s.home):'not detected on this machine'}" onclick="setSource('${s.id}')"><span class="amark" style="background:${s.available?s.accent:'var(--surface-3)'};color:${s.available?accentFg(s.accent):'var(--faint)'}">${esc(s.mark)}</span>${esc(s.label)}${s.available?'':' <span class="muted" style="font-size:10px">·n/a</span>'}</button>`).join('')}
+function rangeBarInner(){return`<span class="rangebar-label">Range</span><div class="chips">${['day','week','month','all'].map(r=>`<span class="chip ${range===r?'on':''}" onclick="setRange('${r}')">${esc(RANGE_LABEL[r])}</span>`).join('')}</div>`}
 function accentFg(hex){if(!hex)return'#fff';const c=hex.replace('#','');const lum=(0.299*parseInt(c.slice(0,2),16)+0.587*parseInt(c.slice(2,4),16)+0.114*parseInt(c.slice(4,6),16))/255;return lum>0.6?'#1a1306':'#fff'}
 function kpiStrip(t,c){const cachePct=t.totalTokens?Math.round(t.cachedInputTokens/t.totalTokens*100):0;const reasonPct=t.outputTokens?Math.round(t.reasoningOutputTokens/t.outputTokens*100):0;
-  let third;
-  if(c.reasoning)third=kpi('Reasoning',fmt(t.reasoningOutputTokens),`${reasonPct}% of output`);
-  else if(c.cost)third=costKpi(t);
-  else third=kpi('Output',fmt(t.outputTokens),`${t.totalTokens?Math.round(t.outputTokens/t.totalTokens*100):0}% of tokens`);
+  const adaptive=[];
+  if(c.reasoning)adaptive.push(kpi('Reasoning',fmt(t.reasoningOutputTokens),`${reasonPct}% of output`));
+  if(c.cost)adaptive.push(costKpi(t));
+  if(!adaptive.length)adaptive.push(kpi('Output',fmt(t.outputTokens),`${t.totalTokens?Math.round(t.outputTokens/t.totalTokens*100):0}% of tokens`));
   return kpi('Total Tokens',fmt(t.totalTokens),`${fmt(t.inputTokens)} in · ${fmt(t.outputTokens)} out`)
     +kpi('Cached Input',fmt(t.cachedInputTokens),`${cachePct}% of all tokens`)
-    +third
+    +adaptive.join('')
     +kpi('Sessions',fmt(t.totalSessions),`${fmt(t.totalPrompts)} prompts · ${fmt(t.totalToolCalls)} tools`)}
 function kpi(label,value,hint){return`<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="hint">${esc(hint)}</div></div>`}
 const RANGE_LABEL={day:'Today',week:'Last 7 days',month:'Last 30 days',all:'All time'};
@@ -348,12 +384,12 @@ function costKpi(t){const cost=t.totalCost||0;const value=cost>=1000?'$'+(cost/1
   return`<div class="kpi"><div class="label">Est. Cost</div><div class="value">${value}</div><div class="hint">${esc(RANGE_LABEL[range])} · API-rate estimate</div></div>`}
 function showErr(err){const app=document.getElementById('app');app.className='wrap';app.innerHTML=`<div class="card empty">${esc(err.message||err)}</div>`}
 function tabBtn(id,label){return`<button class="tab ${activeTab===id?'on':''}" onclick="setTab('${id}')">${label}</button>`}
-function setTab(id){activeTab=id;localStorage.setItem('codex-spend-tab',id);document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick').includes("'"+id+"'")));renderView()}
+function setTab(id){activeTab=id;localStorage.setItem('codex-spend-tab',id);document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick').includes("'"+id+"'")));renderView(true)}
 function toggleTheme(){theme=theme==='dark'?'light':'dark';localStorage.setItem('codex-spend-theme',theme);document.documentElement.dataset.theme=theme;render()}
 
-function renderView(){
+function renderView(animate=false){
   const v=document.getElementById('view');if(!v)return;
-  v.classList.remove('view');void v.offsetWidth;v.classList.add('view');
+  if(animate){v.classList.remove('view');void v.offsetWidth;v.classList.add('view')}
   if(activeTab==='overview')v.innerHTML=overviewView();
   else if(activeTab==='sessions')v.innerHTML=sessionsView();
   else if(activeTab==='prompts')v.innerHTML=promptsView();
@@ -483,7 +519,7 @@ function showTip(html,cx,cy){const t=document.getElementById('chartTip');if(!t)r
 function hideTip(){const t=document.getElementById('chartTip');if(t)t.classList.remove('on')}
 function tipRow(color,label,val){return`<div class="r"><span>${color?`<i style="background:${color}"></i>`:''}${esc(label)}</span><b>${val}</b></div>`}
 function bindHover(el,kind,hits,geo){if(!el)return;el.classList.add('hoverable');el.onmousemove=e=>{const rect=el.getBoundingClientRect();const mx=e.clientX-rect.left,my=e.clientY-rect.top;let hit=null;if(kind==='bar'){hit=hits.find(h=>mx>=h.x0&&mx<=h.x1)}else if(kind==='point'){let bd=26;for(const h of hits){const d=Math.abs(mx-h.x);if(d<bd){bd=d;hit=h}}}else if(kind==='wedge'){const dx=mx-geo.cx,dy=my-geo.cy,dist=Math.hypot(dx,dy);if(dist<=geo.r+2&&dist>=geo.inner-2){let a=Math.atan2(dy,dx);if(a<-Math.PI/2)a+=Math.PI*2;hit=hits.find(h=>a>=h.start&&a<h.end)}}if(hit){showTip(hit.html,e.clientX,e.clientY)}else hideTip()};el.onmouseleave=hideTip}
-function drawDailyChart(){const s=setupCanvas('dailyChart',220);if(!s)return;const{ctx,width,height,el}=s,data=DATA.dailyUsage.slice(-30);if(!data.length)return;const pad={l:46,r:14,t:16,b:34},cw=width-pad.l-pad.r,ch=height-pad.t-pad.b,max=Math.max(...data.map(d=>d.totalTokens),1),bw=Math.max(5,cw/data.length*.62),hits=[];ctx.font='11px '+(cssVar('--mono')||'monospace');ctx.fillStyle=themeColor('--soft');ctx.textAlign='right';for(let i=0;i<=3;i++){const y=pad.t+ch-(i/3)*ch;ctx.fillText(fmt(max*i/3),pad.l-8,y+4);ctx.strokeStyle=themeColor('--line-3');ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(width-pad.r,y);ctx.stroke()}const C={blue:themeColor('--blue'),green:themeColor('--green'),mauve:themeColor('--mauve'),amber:themeColor('--amber')};data.forEach((d,i)=>{const bandX=pad.l+i*cw/data.length,x=bandX+(cw/data.length-bw)/2;let y=pad.t+ch;[[C.blue,freshInput(d)],[C.green,d.cachedInputTokens||0],[C.mauve,d.reasoningOutputTokens||0],[C.amber,visibleOut(d)]].forEach(([color,val])=>{const hh=val/max*ch;y-=hh;ctx.fillStyle=color;ctx.fillRect(x,y,bw,hh)});hits.push({x0:bandX,x1:bandX+cw/data.length,html:`<div class="t">${dateFmt(d.date)} · ${fmt(d.totalTokens)} tokens</div>${tipRow(C.blue,'Fresh input',fmt(freshInput(d)))}${tipRow(C.green,'Cached input',fmt(d.cachedInputTokens||0))}${tipRow(C.mauve,'Reasoning',fmt(d.reasoningOutputTokens||0))}${tipRow(C.amber,'Output',fmt(visibleOut(d)))}${tipRow('','Sessions',fmt(d.sessions||0))}`});if(i%Math.ceil(data.length/6)===0||i===data.length-1){ctx.fillStyle=themeColor('--soft');ctx.textAlign='center';ctx.fillText(dateFmt(d.date),x+bw/2,height-10)}});bindHover(el,'bar',hits)}
+function drawDailyChart(){const s=setupCanvas('dailyChart',220);if(!s)return;const{ctx,width,height,el}=s,data=DATA.dailyUsage.slice(-30);if(!data.length)return;const pad={l:46,r:14,t:16,b:34},cw=width-pad.l-pad.r,ch=height-pad.t-pad.b,max=Math.max(...data.map(d=>d.totalTokens),1),bw=Math.min(56,Math.max(5,cw/data.length*.62)),hits=[];ctx.font='11px '+(cssVar('--mono')||'monospace');ctx.fillStyle=themeColor('--soft');ctx.textAlign='right';for(let i=0;i<=3;i++){const y=pad.t+ch-(i/3)*ch;ctx.fillText(fmt(max*i/3),pad.l-8,y+4);ctx.strokeStyle=themeColor('--line-3');ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(width-pad.r,y);ctx.stroke()}const C={blue:themeColor('--blue'),green:themeColor('--green'),mauve:themeColor('--mauve'),amber:themeColor('--amber')};data.forEach((d,i)=>{const bandX=pad.l+i*cw/data.length,x=bandX+(cw/data.length-bw)/2;let y=pad.t+ch;[[C.blue,freshInput(d)],[C.green,d.cachedInputTokens||0],[C.mauve,d.reasoningOutputTokens||0],[C.amber,visibleOut(d)]].forEach(([color,val])=>{const hh=val/max*ch;y-=hh;ctx.fillStyle=color;ctx.fillRect(x,y,bw,hh)});hits.push({x0:bandX,x1:bandX+cw/data.length,html:`<div class="t">${dateFmt(d.date)} · ${fmt(d.totalTokens)} tokens</div>${tipRow(C.blue,'Fresh input',fmt(freshInput(d)))}${tipRow(C.green,'Cached input',fmt(d.cachedInputTokens||0))}${tipRow(C.mauve,'Reasoning',fmt(d.reasoningOutputTokens||0))}${tipRow(C.amber,'Output',fmt(visibleOut(d)))}${tipRow('','Sessions',fmt(d.sessions||0))}`});if(i%Math.ceil(data.length/6)===0||i===data.length-1){ctx.fillStyle=themeColor('--soft');ctx.textAlign='center';ctx.fillText(dateFmt(d.date),x+bw/2,height-10)}});bindHover(el,'bar',hits)}
 function drawModelChart(){const s=setupCanvas('modelChart',210);if(!s)return;const{ctx,width,el}=s,data=DATA.modelBreakdown.slice(0,8);if(!data.length)return;const colors=[themeColor('--blue'),themeColor('--green'),themeColor('--amber'),themeColor('--mauve'),themeColor('--rose'),themeColor('--brand'),themeColor('--muted'),themeColor('--faint')],total=data.reduce((a,b)=>a+b.totalTokens,0)||1,cx=width/2,cy=88,r=Math.min(74,width/4),inner=r*.56,hits=[];let start=-Math.PI/2;data.forEach((item,i)=>{const ang=item.totalTokens/total*Math.PI*2,col=colors[i%colors.length];ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,start,start+ang);ctx.closePath();ctx.fillStyle=col;ctx.fill();hits.push({start,end:start+ang,html:`<div class="t">${esc(item.model)}</div>${tipRow(col,'Tokens',fmt(item.totalTokens))}${tipRow('','Share',Math.round(item.totalTokens/total*100)+'%')}${tipRow('','Sessions',fmt(item.sessions||0))}`});start+=ang});ctx.beginPath();ctx.arc(cx,cy,inner,0,Math.PI*2);ctx.fillStyle=themeColor('--surface');ctx.fill();ctx.textAlign='center';ctx.fillStyle=themeColor('--ink');ctx.font='800 19px Inter,system-ui';ctx.fillText(fmt(total),cx,cy+2);ctx.fillStyle=themeColor('--soft');ctx.font='650 11px Inter,system-ui';ctx.fillText('tokens',cx,cy+19);data.slice(0,4).forEach((item,i)=>{const x=18+(i%2)*(width/2-8),y=172+Math.floor(i/2)*22;ctx.fillStyle=colors[i];ctx.fillRect(x,y-9,10,10);ctx.fillStyle=themeColor('--soft');ctx.textAlign='left';ctx.font='650 12px Inter,system-ui';ctx.fillText(String(item.model).slice(0,22),x+16,y)});bindHover(el,'wedge',hits,{cx,cy,r,inner})}
 function drawTurnChart(prompt){const s=setupCanvas('turnChart',170);if(!s||!prompt)return;const{ctx,width,height,el}=s,data=prompt.turns||[];if(!data.length){ctx.fillStyle=themeColor('--soft');ctx.font='12px '+(cssVar('--font')||'sans-serif');ctx.textAlign='center';ctx.fillText('No per-turn token data for this prompt.',width/2,height/2);if(el){el.onmousemove=null;el.classList.remove('hoverable')}return}const pad={l:46,r:14,t:16,b:26},cw=width-pad.l-pad.r,ch=height-pad.t-pad.b,max=Math.max(...data.map(t=>t.totalTokens),1),C={blue:themeColor('--blue'),green:themeColor('--green'),mauve:themeColor('--mauve'),amber:themeColor('--amber')},hits=[];ctx.font='10px '+(cssVar('--mono')||'monospace');ctx.fillStyle=themeColor('--soft');ctx.textAlign='right';for(let i=0;i<=3;i++){const y=pad.t+ch-(i/3)*ch;ctx.fillText(fmt(max*i/3),pad.l-8,y+3);ctx.strokeStyle=themeColor('--line-3');ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(width-pad.r,y);ctx.stroke()}ctx.beginPath();data.forEach((t,i)=>{const x=pad.l+(data.length===1?cw/2:i*cw/(data.length-1)),y=pad.t+ch-(t.totalTokens/max)*ch;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});ctx.strokeStyle=C.blue;ctx.lineWidth=2;ctx.stroke();data.forEach((t,i)=>{const x=pad.l+(data.length===1?cw/2:i*cw/(data.length-1)),y=pad.t+ch-(t.totalTokens/max)*ch;ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fillStyle=t.totalTokens===max?themeColor('--rose'):C.green;ctx.fill();hits.push({x,y,idx:i,html:`<div class="t">Turn ${i+1} · ${fmt(t.totalTokens)} tokens · click to open</div>${timeFmt(t.timestamp)?`<div class="r"><span>${timeFmt(t.timestamp)}</span><b></b></div>`:''}${tipRow(C.blue,'Fresh input',fmt(freshInput(t)))}${tipRow(C.green,'Cached input',fmt(t.cachedInputTokens||0))}${tipRow(C.mauve,'Reasoning',fmt(t.reasoningOutputTokens||0))}${tipRow(C.amber,'Output',fmt(visibleOut(t)))}${t.contextWindow?tipRow('','Context window',fmt(t.contextWindow)):''}`});if(i%Math.ceil(data.length/6)===0||i===data.length-1){ctx.fillStyle=themeColor('--soft');ctx.textAlign='center';ctx.fillText(String(i+1),x,height-8)}});bindHover(el,'point',hits);el.style.cursor='pointer';el.onclick=(e)=>{const rect=el.getBoundingClientRect(),mx=e.clientX-rect.left;let bd=1e9,h=null;for(const hh of hits){const d=Math.abs(mx-hh.x);if(d<bd){bd=d;h=hh}}if(h)openTurnByIndex(h.idx)}}
 function openTurnByIndex(i){const turns=document.querySelectorAll('#drawerContent .turns .turn');const el=turns[i];if(!el)return;if(!el.classList.contains('open')){el.classList.add('open');const box=el.querySelector('.turn-content');if(box)loadTurnContent(box)}el.scrollIntoView({behavior:'smooth',block:'center'});el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),1100)}
@@ -505,9 +541,9 @@ document.getElementById('shareOverlay').classList.add('open');}
 function closeShare(){document.getElementById('shareOverlay').classList.remove('open')}
 function downloadShare(){const c=document.getElementById('shareCanvas'),a=document.createElement('a');a.download='claudalytics.png';a.href=c.toDataURL('image/png');a.click()}
 
-async function refresh(){const b=document.querySelector('.btn.primary');if(b)b.textContent='Refreshing…';await fetchData(true)}
+async function refresh(){const b=document.querySelector('.btn.primary');if(b)b.textContent='Refreshing…';setBusy(true);await fetchData(true)}
 function cycleAutoRefresh(){const opts=[0,15000,30000,60000,300000];autoRefreshMs=opts[(opts.indexOf(autoRefreshMs)+1)%opts.length];localStorage.setItem('metrascope-auto-refresh',autoRefreshMs);setupAutoRefresh();if(DATA)render()}
-function setupAutoRefresh(){if(autoTimer){clearInterval(autoTimer);autoTimer=null}if(!autoRefreshMs)return;autoTimer=setInterval(()=>{const sb=document.getElementById('search');if(sb&&document.activeElement===sb)return;if(document.getElementById('drawer').classList.contains('open'))return;if(document.getElementById('shareOverlay').classList.contains('open'))return;fetchData(true).catch(()=>{})},autoRefreshMs)}
+function setupAutoRefresh(){if(autoTimer){clearInterval(autoTimer);autoTimer=null}if(!autoRefreshMs)return;autoTimer=setInterval(()=>{const sb=document.getElementById('search');if(sb&&document.activeElement===sb)return;if(document.getElementById('drawer').classList.contains('open'))return;if(document.getElementById('shareOverlay').classList.contains('open'))return;fetchData(true)},autoRefreshMs)}
 window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeShare();closeDrawer()}});
 window.addEventListener('resize',()=>{if(!DATA||!DATA.sessions.length)return;if(activeTab==='overview'){drawDailyChart();drawModelChart()}if(document.getElementById('drawer').classList.contains('open')){const s=DATA.sessions.find(x=>x.sessionId===selectedSessionId);const p=s?.promptBreakdown.find(x=>x.rank===selectedPromptRank);if(p)drawTurnChart(p)}});
 window.addEventListener('error',(e)=>console.error('[claudalytics] runtime error:',e.message,'@',e.filename+':'+e.lineno));

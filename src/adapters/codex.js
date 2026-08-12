@@ -9,7 +9,34 @@ const id = 'codex';
 const label = 'Codex';
 const mark = 'CX';
 const accent = '#d4a44a';
-const capabilities = { cost: false, reasoning: true, rateLimit: true, cache: true, tools: true, contextWindow: true };
+const capabilities = { cost: true, reasoning: true, rateLimit: true, cache: true, tools: true, contextWindow: true };
+
+// OpenAI API per-token pricing (estimate; Codex CLI is usually billed against a
+// ChatGPT plan, not metered API, so this is a rate estimate, not an invoice).
+// Cached input is consistently ~10% of the fresh-input rate across the GPT-5.x
+// family; OpenAI doesn't bill a separate "cache write" the way Anthropic does.
+const MODEL_PRICING = {
+  'gpt-5.2': { input: 0.875 / 1e6, cachedInput: 0.0875 / 1e6, output: 7.00 / 1e6 },
+  'gpt-5.3-codex': { input: 1.75 / 1e6, cachedInput: 0.175 / 1e6, output: 14.00 / 1e6 },
+  'gpt-5.4-nano': { input: 0.20 / 1e6, cachedInput: 0.02 / 1e6, output: 1.25 / 1e6 },
+  'gpt-5.4-mini': { input: 0.75 / 1e6, cachedInput: 0.075 / 1e6, output: 4.50 / 1e6 },
+  'gpt-5.4': { input: 2.50 / 1e6, cachedInput: 0.25 / 1e6, output: 15.00 / 1e6 },
+  'gpt-5.5-pro': { input: 30.00 / 1e6, cachedInput: 30.00 / 1e6, output: 180.00 / 1e6 },
+  'gpt-5.5': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6 },
+  'gpt-5.6-luna': { input: 0.20 / 1e6, cachedInput: 0.02 / 1e6, output: 1.20 / 1e6 },
+  'gpt-5.6-terra': { input: 2.00 / 1e6, cachedInput: 0.20 / 1e6, output: 12.00 / 1e6 },
+  'gpt-5.6-sol': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6 },
+  'gpt-5.6': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6 },
+};
+// Longest key first, so e.g. "gpt-5.4-mini" matches before the "gpt-5.4" fallback.
+const PRICING_KEYS = Object.keys(MODEL_PRICING).sort((a, b) => b.length - a.length);
+const DEFAULT_PRICING = MODEL_PRICING['gpt-5.5'];
+function getPricing(model) {
+  if (!model) return DEFAULT_PRICING;
+  const m = model.toLowerCase();
+  const key = PRICING_KEYS.find((k) => m.includes(k));
+  return key ? MODEL_PRICING[key] : DEFAULT_PRICING;
+}
 
 function home(options = {}) {
   return expandHome(options.home || options.codexHome || process.env.CODEX_HOME) || path.join(os.homedir(), '.codex');
@@ -109,7 +136,10 @@ function extractSession(entries, filePath, titleMap, promptMap) {
     const usage = tokenUsageFromPayload(payload);
     if (usage) {
       latestRate = latestRateLimit(usage.rateLimits, latestRate);
-      turns.push({ turnId: payload.turn_id || currentTurnId || `turn-${turns.length + 1}`, timestamp: entry.timestamp, prompt: currentUserPrompt || null, model, ...usage });
+      const pricing = getPricing(model);
+      const freshInput = Math.max(0, (usage.inputTokens || 0) - (usage.cachedInputTokens || 0));
+      const cost = freshInput * pricing.input + (usage.cachedInputTokens || 0) * pricing.cachedInput + (usage.outputTokens || 0) * pricing.output;
+      turns.push({ turnId: payload.turn_id || currentTurnId || `turn-${turns.length + 1}`, timestamp: entry.timestamp, prompt: currentUserPrompt || null, model, ...usage, cost });
     }
   }
 
@@ -144,6 +174,7 @@ function extractSession(entries, filePath, titleMap, promptMap) {
     outputTokens: lastTurn.cumulativeOutputTokens || sumTurns(turns, 'outputTokens'),
     reasoningOutputTokens: lastTurn.cumulativeReasoningOutputTokens || sumTurns(turns, 'reasoningOutputTokens'),
     totalTokens: lastTurn.cumulativeTokens || sumTurns(turns, 'totalTokens'),
+    cost: sumTurns(turns, 'cost'),
     contextWindow: lastTurn.contextWindow || null, peakInputTokens, peakTurnTokens, rateLimit: latestRate,
   };
 }
