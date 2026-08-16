@@ -263,13 +263,33 @@ function buildResult(sessions, source, capabilities, warnings = []) {
     totals.totalCost += session.cost || 0;
     addMetric(totals, session);
 
-    if (!dailyMap[session.date]) dailyMap[session.date] = { date: session.date, sessions: 0, turns: 0, toolCalls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 };
-    dailyMap[session.date].sessions += 1;
-    dailyMap[session.date].turns += session.turnCount;
-    dailyMap[session.date].toolCalls += session.toolCount;
-    addMetric(dailyMap[session.date], session);
+    // Bucket by each turn's own date/weekday, not the session's start date — a
+    // long-running session can span several days, and lumping its whole total
+    // onto day one hides where the tokens actually happened.
+    const daysTouched = new Set();
+    const weekdaysTouched = new Set();
+    for (const turn of session.turns) {
+      const day = turn.timestamp ? turn.timestamp.slice(0, 10) : session.date;
+      if (!dailyMap[day]) dailyMap[day] = { date: day, sessions: 0, turns: 0, toolCalls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 };
+      dailyMap[day].turns += 1;
+      addMetric(dailyMap[day], turn);
+      daysTouched.add(day);
 
-    if (session.timestamp) {
+      if (turn.timestamp) {
+        const wd = new Date(turn.timestamp).getDay();
+        if (!weekdayMap[wd]) weekdayMap[wd] = { weekday: wd, sessions: 0, totalTokens: 0 };
+        weekdayMap[wd].totalTokens += turn.totalTokens || 0;
+        weekdaysTouched.add(wd);
+      }
+    }
+    if (daysTouched.size === 0) {
+      if (!dailyMap[session.date]) dailyMap[session.date] = { date: session.date, sessions: 0, turns: 0, toolCalls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 };
+      daysTouched.add(session.date);
+    }
+    for (const day of daysTouched) { dailyMap[day].sessions += 1; dailyMap[day].toolCalls += session.toolCount; }
+    for (const wd of weekdaysTouched) weekdayMap[wd].sessions += 1;
+
+    if (session.timestamp && weekdaysTouched.size === 0) {
       const wd = new Date(session.timestamp).getDay();
       if (!weekdayMap[wd]) weekdayMap[wd] = { weekday: wd, sessions: 0, totalTokens: 0 };
       weekdayMap[wd].sessions += 1;
