@@ -1,18 +1,49 @@
 const express = require('express');
 const path = require('path');
 const registry = require('./adapters');
-const { buildResult } = require('./adapters/aggregate');
+const { buildResult, buildPromptBreakdown } = require('./adapters/aggregate');
 
 const RANGE_DAYS = { day: 0, week: 6, month: 29 };
+
+// Recompute a session's aggregate fields from only the turns that fall in range —
+// a multi-day session can't just be included/excluded wholesale by its start date.
+function rescopeSession(session, turns) {
+  const sum = (key) => turns.reduce((t, x) => t + (x[key] || 0), 0);
+  const firstTimestamp = turns[0]?.timestamp || session.timestamp;
+  const promptBreakdown = buildPromptBreakdown(turns, [], session.title);
+  return {
+    ...session,
+    turns,
+    turnCount: turns.length,
+    timestamp: firstTimestamp,
+    date: firstTimestamp ? firstTimestamp.slice(0, 10) : session.date,
+    updatedTimestamp: turns[turns.length - 1]?.timestamp || session.updatedTimestamp,
+    inputTokens: sum('inputTokens'),
+    cachedInputTokens: sum('cachedInputTokens'),
+    outputTokens: sum('outputTokens'),
+    reasoningOutputTokens: sum('reasoningOutputTokens'),
+    totalTokens: sum('totalTokens'),
+    cost: sum('cost'),
+    promptCount: promptBreakdown.length,
+    promptBreakdown,
+    peakInputTokens: turns.reduce((m, t) => Math.max(m, t.inputTokens || 0), 0),
+    peakTurnTokens: turns.reduce((m, t) => Math.max(m, t.totalTokens || 0), 0),
+  };
+}
 
 function scopeToRange(full, range) {
   if (!range || range === 'all' || !(range in RANGE_DAYS)) return full;
   const start = new Date();
   start.setDate(start.getDate() - RANGE_DAYS[range]);
   const startStr = start.toISOString().slice(0, 10);
-  const filtered = full.sessions.filter((s) => s.date && s.date >= startStr);
-  if (filtered.length === full.sessions.length) return full;
-  return buildResult(filtered, full.source, full.capabilities, full.warnings);
+
+  const scoped = [];
+  for (const session of full.sessions) {
+    const turns = (session.turns || []).filter((t) => (t.timestamp ? t.timestamp.slice(0, 10) : session.date) >= startStr);
+    if (turns.length === 0) continue;
+    scoped.push(turns.length === session.turns.length ? session : rescopeSession(session, turns));
+  }
+  return buildResult(scoped, full.source, full.capabilities, full.warnings);
 }
 
 function createServer(options = {}) {
