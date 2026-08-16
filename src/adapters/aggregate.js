@@ -219,6 +219,28 @@ function generateInsights(sessions, totals, largestTurns, topPrompts, weekdayUsa
   return insights;
 }
 
+// Insert zero-token entries for calendar days with no sessions, so chart bars are
+// spaced by real elapsed time instead of by index — otherwise a big spike on a day
+// that falls between two sparse days can end up unlabeled and visually misplaced.
+function fillDailyGaps(days) {
+  if (days.length < 2) return days;
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const [y0, m0, d0] = days[0].date.split('-').map(Number);
+  const [y1, m1, d1] = days[days.length - 1].date.split('-').map(Number);
+  const cursor = new Date(Date.UTC(y0, m0 - 1, d0));
+  const end = Date.UTC(y1, m1 - 1, d1);
+  const filled = [];
+  while (cursor.getTime() <= end) {
+    const date = cursor.toISOString().slice(0, 10);
+    filled.push(byDate.get(date) || {
+      date, sessions: 0, turns: 0, toolCalls: 0,
+      inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0,
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return filled;
+}
+
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // sessions: normalized session objects. source/capabilities: adapter metadata.
@@ -291,7 +313,7 @@ function buildResult(sessions, source, capabilities, warnings = []) {
     if (session.rateLimit) totals.latestRateLimit = session.rateLimit;
   }
 
-  const dailyUsage = Object.values(dailyMap).filter((d) => d.date !== 'unknown').sort((a, b) => a.date.localeCompare(b.date));
+  const dailyUsage = fillDailyGaps(Object.values(dailyMap).filter((d) => d.date !== 'unknown').sort((a, b) => a.date.localeCompare(b.date)));
   const weekdayUsage = Object.values(weekdayMap)
     .map((w) => ({ ...w, name: WEEKDAYS[w.weekday], avgTokens: w.sessions ? Math.round(w.totalTokens / w.sessions) : 0 }))
     .sort((a, b) => a.weekday - b.weekday);
