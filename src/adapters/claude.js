@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { expandHome, parseJSONLFile, clip } = require('./shared');
+const { expandHome, parseJSONLFile, clip, localDay } = require('./shared');
 const { getPromptTemplate } = require('./claude-prompt');
 const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
 
@@ -190,7 +190,7 @@ async function parse(options = {}) {
 
       const firstTs = entries.find((e) => e.timestamp)?.timestamp || null;
       const lastTs = entries.slice().reverse().find((e) => e.timestamp)?.timestamp || firstTs;
-      const date = firstTs ? firstTs.split('T')[0] : 'unknown';
+      const date = firstTs ? localDay(firstTs) : 'unknown';
       const modelCounts = {};
       for (const t of rawTurns) modelCounts[t.model] = (modelCounts[t.model] || 0) + 1;
       const primaryModel = modelLabel(Object.entries(modelCounts).sort((a, b) => b[1] - a[1])[0]?.[0]);

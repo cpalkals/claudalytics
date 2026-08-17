@@ -1,6 +1,6 @@
 // Shared aggregation: turns normalized per-session data from any adapter into
 // the single dashboard schema (daily/model/project/tool breakdowns + insights).
-const { sum, fmt } = require('./shared');
+const { sum, fmt, localDay } = require('./shared');
 
 function addMetric(target, source) {
   target.inputTokens += source.inputTokens || 0;
@@ -269,7 +269,7 @@ function buildResult(sessions, source, capabilities, warnings = []) {
     const daysTouched = new Set();
     const weekdaysTouched = new Set();
     for (const turn of session.turns) {
-      const day = turn.timestamp ? turn.timestamp.slice(0, 10) : session.date;
+      const day = turn.timestamp ? localDay(turn.timestamp) : session.date;
       if (!dailyMap[day]) dailyMap[day] = { date: day, sessions: 0, turns: 0, toolCalls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 };
       dailyMap[day].turns += 1;
       addMetric(dailyMap[day], turn);

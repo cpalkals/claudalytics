@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const registry = require('./adapters');
 const { buildResult, buildPromptBreakdown } = require('./adapters/aggregate');
+const { localDay } = require('./adapters/shared');
 
 const RANGE_DAYS = { day: 0, week: 6, month: 29 };
 
@@ -16,7 +17,7 @@ function rescopeSession(session, turns) {
     turns,
     turnCount: turns.length,
     timestamp: firstTimestamp,
-    date: firstTimestamp ? firstTimestamp.slice(0, 10) : session.date,
+    date: firstTimestamp ? localDay(firstTimestamp) : session.date,
     updatedTimestamp: turns[turns.length - 1]?.timestamp || session.updatedTimestamp,
     inputTokens: sum('inputTokens'),
     cachedInputTokens: sum('cachedInputTokens'),
@@ -35,11 +36,11 @@ function scopeToRange(full, range) {
   if (!range || range === 'all' || !(range in RANGE_DAYS)) return full;
   const start = new Date();
   start.setDate(start.getDate() - RANGE_DAYS[range]);
-  const startStr = start.toISOString().slice(0, 10);
+  const startStr = localDay(start);
 
   const scoped = [];
   for (const session of full.sessions) {
-    const turns = (session.turns || []).filter((t) => (t.timestamp ? t.timestamp.slice(0, 10) : session.date) >= startStr);
+    const turns = (session.turns || []).filter((t) => (t.timestamp ? localDay(t.timestamp) : session.date) >= startStr);
     if (turns.length === 0) continue;
     scoped.push(turns.length === session.turns.length ? session : rescopeSession(session, turns));
   }

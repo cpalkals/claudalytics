@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { expandHome, parseJSONLFile, walkJSONL, textFromContent, projectFromCwd, clip } = require('./shared');
+const { expandHome, parseJSONLFile, walkJSONL, textFromContent, projectFromCwd, clip, localDay } = require('./shared');
 const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
 
 const id = 'qwen';
@@ -86,7 +86,7 @@ function extractSession(entries, filePath) {
   const sessionId = entries.find((e) => e.sessionId)?.sessionId || path.basename(filePath, '.jsonl');
   const firstTs = entries.find((e) => e.timestamp)?.timestamp || null;
   const lastTs = entries.slice().reverse().find((e) => e.timestamp)?.timestamp || firstTs;
-  const date = firstTs ? firstTs.split('T')[0] : 'unknown';
+  const date = firstTs ? localDay(firstTs) : 'unknown';
   const project = projectFromCwd(cwd);
   const modelCounts = {};
   for (const t of turns) if (t.model) modelCounts[t.model] = (modelCounts[t.model] || 0) + 1;

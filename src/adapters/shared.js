@@ -54,6 +54,19 @@ function walkJSONL(dir, files = []) {
   return files;
 }
 
+// Calendar day in the machine's local timezone — NOT the UTC date. Splitting an
+// ISO timestamp string (or calling toISOString()) gives the UTC day, which is a
+// day ahead of local for anyone west of Greenwich once it's past ~7-8pm local.
+function localDay(value) {
+  if (!value) return null;
+  const d = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function textFromContent(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -94,4 +107,4 @@ function fmt(n) {
   return n.toLocaleString();
 }
 
-module.exports = { expandHome, parseJSONLFile, readJSONLMap, walkJSONL, textFromContent, projectFromCwd, sum, fmt, clip, safeParse };
+module.exports = { expandHome, parseJSONLFile, readJSONLMap, walkJSONL, textFromContent, projectFromCwd, sum, fmt, clip, safeParse, localDay };

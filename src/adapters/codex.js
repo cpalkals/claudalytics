@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { expandHome, parseJSONLFile, readJSONLMap, walkJSONL, textFromContent, projectFromCwd, clip } = require('./shared');
+const { expandHome, parseJSONLFile, readJSONLMap, walkJSONL, textFromContent, projectFromCwd, clip, localDay } = require('./shared');
 const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
 
 const id = 'codex';
@@ -151,7 +151,7 @@ function extractSession(entries, filePath, titleMap, promptMap) {
   const peakTurnTokens = turns.reduce((max, t) => Math.max(max, t.totalTokens || 0), 0);
   const firstTimestamp = meta.timestamp || entries.find((e) => e.timestamp)?.timestamp || null;
   const updatedTimestamp = entries.slice().reverse().find((e) => e.timestamp)?.timestamp || firstTimestamp;
-  const date = firstTimestamp ? firstTimestamp.split('T')[0] : 'unknown';
+  const date = firstTimestamp ? localDay(firstTimestamp) : 'unknown';
   const titleCandidate = titleMap[sessionId];
   const historyPrompt = promptMap[sessionId];
   const title = (isHumanPrompt(titleCandidate) && titleCandidate)

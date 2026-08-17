@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { expandHome, projectFromCwd, clip } = require('./shared');
+const { expandHome, projectFromCwd, clip, localDay } = require('./shared');
 const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
 
 const id = 'opencode';
@@ -116,7 +116,7 @@ async function parse(options = {}) {
 
       const firstTs = new Date(s.time_created).toISOString();
       const lastTs = new Date(s.time_updated || s.time_created).toISOString();
-      const date = firstTs.split('T')[0];
+      const date = localDay(firstTs);
       const sessionModel = safeParse(s.model).id || safeParse(s.model).modelID;
       const modelCounts = {};
       for (const t of turns) if (t.model && t.model !== 'unknown') modelCounts[t.model] = (modelCounts[t.model] || 0) + 1;
