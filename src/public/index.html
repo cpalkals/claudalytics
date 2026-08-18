@@ -383,8 +383,8 @@ function kpiStrip(t,c){const cachePct=t.totalTokens?Math.round(t.cachedInputToke
     +kpi('Sessions',fmt(t.totalSessions),`${fmt(t.totalPrompts)} prompts · ${fmt(t.totalToolCalls)} tools`)}
 function kpi(label,value,hint){return`<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="hint">${esc(hint)}</div></div>`}
 const RANGE_LABEL={day:'Today',week:'Last 7 days',month:'Last 30 days',all:'All time'};
-function costKpi(t){const cost=t.totalCost||0;const value=cost>=1000?'$'+(cost/1000).toFixed(1)+'K':'$'+cost.toFixed(2);
-  return`<div class="kpi"><div class="label">Est. Cost</div><div class="value">${value}</div><div class="hint">${esc(RANGE_LABEL[range])} · API-rate estimate</div></div>`}
+function costKpi(t){const cost=t.totalCost||0;const value=cost>=1000?'$'+(cost/1000).toFixed(1)+'K':'$'+cost.toFixed(2),coverage=Math.round((t.costCoverage??1)*100),partial=coverage<100,disclaimer=DATA.source?.costDisclaimer||'API-rate estimate, not a subscription bill.';
+  return`<div class="kpi" title="${esc(disclaimer)}"><div class="label">Est. API Cost</div><div class="value">${value}</div><div class="hint">${esc(RANGE_LABEL[range])} · ${partial?coverage+'% priced':'standard rates'} · not subscription bill</div></div>`}
 function showErr(err){const app=document.getElementById('app');app.className='wrap';app.innerHTML=`<div class="card empty">${esc(err.message||err)}</div>`}
 function tabBtn(id,label){return`<button class="tab ${activeTab===id?'on':''}" onclick="setTab('${id}')">${label}</button>`}
 function setTab(id){activeTab=id;localStorage.setItem('codex-spend-tab',id);document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.getAttribute('onclick').includes("'"+id+"'")));renderView(true)}
@@ -482,7 +482,8 @@ function turnDetail(t,i){const C=caps();const total=Math.max(t.totalTokens||((t.
       ${C.reasoning&&reason?row('var(--mauve)','· Reasoning',reason):''}
       <div class="bd-row total"><span class="bd-k">Total</span><span class="bd-v">${fmt(total)}</span><span class="bd-p"></span></div>
     </div>
-    ${C.cost&&t.cost?`<div class="bd-meta">Est. cost ≈ $${Number(t.cost).toFixed(4)}</div>`:''}
+    ${C.cost&&t.costEstimated!==false&&t.cost?`<div class="bd-meta">Est. standard API cost ≈ $${Number(t.cost).toFixed(4)}${t.longContextPricing?' · long-context rate':''}</div>`:''}
+    ${C.cost&&t.costEstimated===false?`<div class="bd-meta">API cost not estimated · no configured official rate for this model</div>`:''}
     ${t.contextWindow?`<div class="bd-meta">Context window: ${fmt(t.contextWindow)} tokens</div>`:''}
     ${t.tools&&t.tools.length?`<div class="bd-tools">Tools this turn: ${t.tools.map(esc).join(', ')}</div>`:''}
     <div class="turn-content" data-turn="${esc(t.turnId||'')}" data-time="${esc(t.timestamp||'')}" data-idx="${i}"></div>
@@ -536,7 +537,7 @@ ctx.fillStyle='#e3e2df';ctx.font='800 40px Inter,system-ui';ctx.fillText('My '+(
 if(t.dateRange){ctx.fillStyle='#888a92';ctx.font='500 18px Inter,system-ui';ctx.fillText(`${t.dateRange.from} to ${t.dateRange.to}`,122,120);}
 const ins=DATA.insights||[];if(ins.length){ctx.fillStyle='#e3c281';ctx.font='600 21px Inter,system-ui';wrapText(ctx,ins[0].title,60,176,W-120,28,2);}
 const cachePct=t.totalTokens?Math.round(t.cachedInputTokens/t.totalTokens*100):0,C=caps();
-const fourth=C.reasoning?{l:'REASONING TOKENS',v:fmt(t.reasoningOutputTokens)}:C.cost?{l:'EST. COST',v:t.totalCost>=1000?'$'+(t.totalCost/1000).toFixed(1)+'K':'$'+t.totalCost.toFixed(2)}:{l:'OUTPUT TOKENS',v:fmt(t.outputTokens)};
+const fourth=C.reasoning?{l:'REASONING TOKENS',v:fmt(t.reasoningOutputTokens)}:C.cost?{l:'EST. API COST',v:t.totalCost>=1000?'$'+(t.totalCost/1000).toFixed(1)+'K':'$'+t.totalCost.toFixed(2)}:{l:'OUTPUT TOKENS',v:fmt(t.outputTokens)};
 const cards=[{l:'TOTAL TOKENS',v:fmt(t.totalTokens)},{l:'SESSIONS',v:fmt(t.totalSessions)},{l:'CACHED INPUT',v:cachePct+'%'},fourth];
 const gy=232,cw=(W-120-40)/2,chH=158;cards.forEach((s,i)=>{const col=i%2,row=Math.floor(i/2),x=60+col*(cw+40),y=gy+row*(chH+20);ctx.fillStyle='rgba(255,255,255,.05)';roundRect(ctx,x,y,cw,chH,16);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=1;roundRect(ctx,x,y,cw,chH,16);ctx.stroke();ctx.fillStyle='#888a92';ctx.font='600 14px Inter,system-ui';ctx.fillText(s.l,x+24,y+38);ctx.fillStyle='#e3e2df';ctx.font='800 46px Inter,system-ui';ctx.fillText(s.v,x+24,y+102);});
 ctx.fillStyle='#888a92';ctx.font='600 16px Inter,system-ui';ctx.fillText('claudalytics',60,H-40);ctx.textAlign='right';ctx.fillStyle='#5d6068';ctx.font='500 15px Inter,system-ui';ctx.fillText('npx github:cpalkals/claudalytics',W-60,H-40);ctx.textAlign='left';

@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/server.js && node -e \"require('./src/adapters')\""
+    "check": "node --check src/index.js && node --check src/server.js && node -e \"require('./src/adapters')\"",
+    "test": "node --test"
   },
   "files": [
     "src",

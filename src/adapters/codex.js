@@ -11,31 +11,49 @@ const mark = 'CX';
 const accent = '#d4a44a';
 const capabilities = { cost: true, reasoning: true, rateLimit: true, cache: true, tools: true, contextWindow: true };
 
-// OpenAI API per-token pricing (estimate; Codex CLI is usually billed against a
-// ChatGPT plan, not metered API, so this is a rate estimate, not an invoice).
-// Cached input is consistently ~10% of the fresh-input rate across the GPT-5.x
-// family; OpenAI doesn't bill a separate "cache write" the way Anthropic does.
+// Standard OpenAI API text-token rates, expressed per token. Codex CLI is
+// usually covered by a ChatGPT plan, so these produce an API-equivalent estimate
+// rather than a subscription bill. Keep this table aligned with:
+// https://developers.openai.com/api/docs/pricing
+//
+// Models with a 1.05M context window charge the long-context rates for an entire
+// request once input exceeds 272K tokens: 2x input/cached input and 1.5x output.
 const MODEL_PRICING = {
-  'gpt-5.2': { input: 0.875 / 1e6, cachedInput: 0.0875 / 1e6, output: 7.00 / 1e6 },
+  'gpt-5.2': { input: 1.75 / 1e6, cachedInput: 0.175 / 1e6, output: 14.00 / 1e6 },
   'gpt-5.3-codex': { input: 1.75 / 1e6, cachedInput: 0.175 / 1e6, output: 14.00 / 1e6 },
   'gpt-5.4-nano': { input: 0.20 / 1e6, cachedInput: 0.02 / 1e6, output: 1.25 / 1e6 },
   'gpt-5.4-mini': { input: 0.75 / 1e6, cachedInput: 0.075 / 1e6, output: 4.50 / 1e6 },
-  'gpt-5.4': { input: 2.50 / 1e6, cachedInput: 0.25 / 1e6, output: 15.00 / 1e6 },
-  'gpt-5.5-pro': { input: 30.00 / 1e6, cachedInput: 30.00 / 1e6, output: 180.00 / 1e6 },
-  'gpt-5.5': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6 },
-  'gpt-5.6-luna': { input: 0.20 / 1e6, cachedInput: 0.02 / 1e6, output: 1.20 / 1e6 },
-  'gpt-5.6-terra': { input: 2.00 / 1e6, cachedInput: 0.20 / 1e6, output: 12.00 / 1e6 },
-  'gpt-5.6-sol': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6 },
-  'gpt-5.6': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6 },
+  'gpt-5.4': { input: 2.50 / 1e6, cachedInput: 0.25 / 1e6, output: 15.00 / 1e6, longContext: true },
+  'gpt-5.5-pro': { input: 30.00 / 1e6, cachedInput: 30.00 / 1e6, output: 180.00 / 1e6, longContext: true },
+  'gpt-5.5': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6, longContext: true },
+  'gpt-5.6-luna': { input: 0.20 / 1e6, cachedInput: 0.02 / 1e6, output: 1.20 / 1e6, longContext: true },
+  'gpt-5.6-terra': { input: 2.00 / 1e6, cachedInput: 0.20 / 1e6, output: 12.00 / 1e6, longContext: true },
+  'gpt-5.6-sol': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6, longContext: true },
+  'gpt-5.6': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6, longContext: true },
 };
+const LONG_CONTEXT_THRESHOLD = 272000;
 // Longest key first, so e.g. "gpt-5.4-mini" matches before the "gpt-5.4" fallback.
 const PRICING_KEYS = Object.keys(MODEL_PRICING).sort((a, b) => b.length - a.length);
-const DEFAULT_PRICING = MODEL_PRICING['gpt-5.5'];
 function getPricing(model) {
-  if (!model) return DEFAULT_PRICING;
+  if (!model) return null;
   const m = model.toLowerCase();
   const key = PRICING_KEYS.find((k) => m.includes(k));
-  return key ? MODEL_PRICING[key] : DEFAULT_PRICING;
+  return key ? MODEL_PRICING[key] : null;
+}
+
+function estimateCost(usage, model) {
+  const pricing = getPricing(model);
+  if (!pricing) return null;
+  const freshInput = Math.max(0, usage.inputTokens - usage.cachedInputTokens);
+  const longContext = Boolean(pricing.longContext && usage.inputTokens > LONG_CONTEXT_THRESHOLD);
+  const inputMultiplier = longContext ? 2 : 1;
+  const outputMultiplier = longContext ? 1.5 : 1;
+  return {
+    cost: freshInput * pricing.input * inputMultiplier
+      + usage.cachedInputTokens * pricing.cachedInput * inputMultiplier
+      + usage.outputTokens * pricing.output * outputMultiplier,
+    longContext,
+  };
 }
 
 function home(options = {}) {
@@ -68,22 +86,42 @@ function extractSessionId(filePath, metaId) {
 function tokenUsageFromPayload(payload) {
   if (!payload || payload.type !== 'token_count') return null;
   const info = payload.info || {};
-  const last = info.last_token_usage || {};
+  const last = info.last_token_usage;
+  if (!last) return null;
   const total = info.total_token_usage || {};
+  const inputTokens = Math.max(0, Number(last.input_tokens) || 0);
+  const cachedInputTokens = Math.max(0, Number(last.cached_input_tokens) || 0);
+  const outputTokens = Math.max(0, Number(last.output_tokens) || 0);
+  const cumulativeInputTokens = Math.max(0, Number(total.input_tokens) || 0);
+  const cumulativeCachedInputTokens = Math.max(0, Number(total.cached_input_tokens) || 0);
+  const cumulativeOutputTokens = Math.max(0, Number(total.output_tokens) || 0);
+  const cumulativeReasoningOutputTokens = Math.max(0, Number(total.reasoning_output_tokens) || 0);
   return {
-    inputTokens: last.input_tokens || 0,
-    cachedInputTokens: last.cached_input_tokens || 0,
-    outputTokens: last.output_tokens || 0,
-    reasoningOutputTokens: last.reasoning_output_tokens || 0,
-    totalTokens: last.total_tokens || 0,
-    cumulativeTokens: total.total_tokens || 0,
-    cumulativeInputTokens: total.input_tokens || 0,
-    cumulativeCachedInputTokens: total.cached_input_tokens || 0,
-    cumulativeOutputTokens: total.output_tokens || 0,
-    cumulativeReasoningOutputTokens: total.reasoning_output_tokens || 0,
+    inputTokens,
+    cachedInputTokens: Math.min(inputTokens, cachedInputTokens),
+    outputTokens,
+    reasoningOutputTokens: Math.min(outputTokens, Math.max(0, Number(last.reasoning_output_tokens) || 0)),
+    // Codex has occasionally logged inconsistent last_token_usage.total_tokens.
+    // Input + output is the invariant used by the cumulative counters and keeps
+    // reasoning (which is a subset of output) from being counted twice.
+    totalTokens: inputTokens + outputTokens,
+    cumulativeTokens: cumulativeInputTokens + cumulativeOutputTokens,
+    cumulativeInputTokens,
+    cumulativeCachedInputTokens: Math.min(cumulativeInputTokens, cumulativeCachedInputTokens),
+    cumulativeOutputTokens,
+    cumulativeReasoningOutputTokens: Math.min(cumulativeOutputTokens, cumulativeReasoningOutputTokens),
     contextWindow: info.model_context_window || null,
-    rateLimits: payload.rate_limits || null,
   };
+}
+
+function cumulativeFingerprint(usage) {
+  if (!usage || usage.cumulativeTokens <= 0) return null;
+  return [
+    usage.cumulativeInputTokens,
+    usage.cumulativeCachedInputTokens,
+    usage.cumulativeOutputTokens,
+    usage.cumulativeReasoningOutputTokens,
+  ].join(':');
 }
 
 function latestRateLimit(rateLimits, previous) {
@@ -115,6 +153,7 @@ function extractSession(entries, filePath, titleMap, promptMap) {
   const toolCounts = {};
   const toolEvents = [];
   let agentMessages = 0;
+  let previousCumulative = null;
 
   for (const entry of entries) {
     const payload = entry.payload || {};
@@ -133,13 +172,24 @@ function extractSession(entries, filePath, titleMap, promptMap) {
       continue;
     }
     if (payload.type === 'agent_message') { agentMessages += 1; continue; }
+    if (payload.type === 'token_count') latestRate = latestRateLimit(payload.rate_limits, latestRate);
     const usage = tokenUsageFromPayload(payload);
     if (usage) {
-      latestRate = latestRateLimit(usage.rateLimits, latestRate);
-      const pricing = getPricing(model);
-      const freshInput = Math.max(0, (usage.inputTokens || 0) - (usage.cachedInputTokens || 0));
-      const cost = freshInput * pricing.input + (usage.cachedInputTokens || 0) * pricing.cachedInput + (usage.outputTokens || 0) * pricing.output;
-      turns.push({ turnId: payload.turn_id || currentTurnId || `turn-${turns.length + 1}`, timestamp: entry.timestamp, prompt: currentUserPrompt || null, model, ...usage, cost });
+      const fingerprint = cumulativeFingerprint(usage);
+      if (fingerprint && fingerprint === previousCumulative) continue;
+      if (fingerprint) previousCumulative = fingerprint;
+      if (usage.totalTokens === 0) continue;
+      const estimate = estimateCost(usage, model);
+      turns.push({
+        turnId: payload.turn_id || currentTurnId || `turn-${turns.length + 1}`,
+        timestamp: entry.timestamp,
+        prompt: currentUserPrompt || null,
+        model,
+        ...usage,
+        cost: estimate?.cost || 0,
+        costEstimated: Boolean(estimate),
+        longContextPricing: estimate?.longContext || false,
+      });
     }
   }
 
@@ -169,19 +219,29 @@ function extractSession(entries, filePath, titleMap, promptMap) {
     turnCount: turns.length, agentMessages,
     toolCount: Object.values(toolCounts).reduce((s, n) => s + n, 0), toolCounts,
     promptCount: promptBreakdown.length, promptBreakdown, turns,
-    inputTokens: lastTurn.cumulativeInputTokens || sumTurns(turns, 'inputTokens'),
-    cachedInputTokens: lastTurn.cumulativeCachedInputTokens || sumTurns(turns, 'cachedInputTokens'),
-    outputTokens: lastTurn.cumulativeOutputTokens || sumTurns(turns, 'outputTokens'),
-    reasoningOutputTokens: lastTurn.cumulativeReasoningOutputTokens || sumTurns(turns, 'reasoningOutputTokens'),
-    totalTokens: lastTurn.cumulativeTokens || sumTurns(turns, 'totalTokens'),
+    // Sum observed request increments. A resumed rollout can inherit cumulative
+    // counters from its parent, so using the final cumulative snapshot here
+    // would assign old usage to the new file (and often count it twice).
+    inputTokens: sumTurns(turns, 'inputTokens'),
+    cachedInputTokens: sumTurns(turns, 'cachedInputTokens'),
+    outputTokens: sumTurns(turns, 'outputTokens'),
+    reasoningOutputTokens: sumTurns(turns, 'reasoningOutputTokens'),
+    totalTokens: sumTurns(turns, 'totalTokens'),
     cost: sumTurns(turns, 'cost'),
+    pricedTokens: turns.filter((turn) => turn.costEstimated).reduce((sum, turn) => sum + turn.totalTokens, 0),
+    unpricedTokens: turns.filter((turn) => !turn.costEstimated).reduce((sum, turn) => sum + turn.totalTokens, 0),
     contextWindow: lastTurn.contextWindow || null, peakInputTokens, peakTurnTokens, rateLimit: latestRate,
   };
 }
 
 async function parse(options = {}) {
   const h = home(options);
-  const source = { id, label, mark, accent, home: h };
+  const source = {
+    id, label, mark, accent, home: h,
+    costBasis: 'Standard OpenAI API text-token rates',
+    costUpdated: '2026-08-18',
+    costDisclaimer: 'API-equivalent estimate, not a ChatGPT subscription bill. Cache-write charges are excluded because Codex logs do not report cache-write tokens.',
+  };
   if (!fs.existsSync(h)) return emptyResult(source, capabilities, [{ type: 'missing-dir', message: `Codex home not found at ${h}` }]);
 
   const titleMap = await readJSONLMap(path.join(h, 'session_index.jsonl'), (e) => e.id, (e) => e.thread_name || e.id);
@@ -197,6 +257,15 @@ async function parse(options = {}) {
     catch (err) { warnings.push({ type: 'read-failed', message: `Could not read ${filePath}: ${err.message}` }); continue; }
     const session = extractSession(entries, filePath, titleMap, promptMap);
     if (session) sessions.push(session);
+  }
+  const unpricedModels = [...new Set(sessions.flatMap((session) => session.turns)
+    .filter((turn) => !turn.costEstimated)
+    .map((turn) => turn.model || 'unknown'))].sort();
+  if (unpricedModels.length) {
+    warnings.push({
+      type: 'unpriced-model',
+      message: `No official API rate is configured for: ${unpricedModels.join(', ')}. Their tokens are excluded from estimated cost.`,
+    });
   }
   return buildResult(sessions, source, capabilities, warnings);
 }
@@ -250,4 +319,7 @@ async function content(session, options = {}) {
   return { system, items: [...byTurn.values()].map((t) => ({ ...t, output: clip(t.output) })) };
 }
 
-module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content };
+module.exports = {
+  id, label, mark, accent, capabilities, home, detect, parse, content,
+  _test: { MODEL_PRICING, LONG_CONTEXT_THRESHOLD, getPricing, estimateCost, tokenUsageFromPayload, extractSession },
+};

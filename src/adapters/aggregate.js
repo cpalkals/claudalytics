@@ -45,7 +45,8 @@ function buildPromptBreakdown(turns, toolEvents, fallbackTitle) {
       current = {
         key, prompt: key.slice(0, 700), firstTimestamp: turn.timestamp, lastTimestamp: turn.timestamp,
         turnIds: [], turnCount: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
-        reasoningOutputTokens: 0, totalTokens: 0, maxTurnTokens: 0, model: 'unknown', modelCounts: {}, toolCounts: {}, turns: [],
+        reasoningOutputTokens: 0, totalTokens: 0, cost: 0, maxTurnTokens: 0,
+        model: 'unknown', modelCounts: {}, toolCounts: {}, turns: [],
       };
     }
     current.lastTimestamp = turn.timestamp || current.lastTimestamp;
@@ -55,12 +56,14 @@ function buildPromptBreakdown(turns, toolEvents, fallbackTitle) {
     current.cachedInputTokens += turn.cachedInputTokens || 0;
     current.outputTokens += turn.outputTokens || 0;
     current.reasoningOutputTokens += turn.reasoningOutputTokens || 0;
+    current.cost += turn.cost || 0;
     current.maxTurnTokens = Math.max(current.maxTurnTokens, turn.totalTokens || 0);
     if (turn.model) current.modelCounts[turn.model] = (current.modelCounts[turn.model] || 0) + 1;
     current.turns.push({
       turnId: turn.turnId, timestamp: turn.timestamp, model: turn.model,
       inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens, outputTokens: turn.outputTokens,
       reasoningOutputTokens: turn.reasoningOutputTokens, totalTokens: turn.totalTokens, contextWindow: turn.contextWindow,
+      cost: turn.cost, costEstimated: turn.costEstimated, longContextPricing: turn.longContextPricing,
       tools: turn.tools, hasText: turn.hasText,
     });
   }
@@ -93,10 +96,13 @@ function generateInsights(sessions, totals, largestTurns, topPrompts, weekdayUsa
   }
 
   if (caps.cost && totals.totalCost > 0) {
+    const coverage = totals.costCoverage < 1
+      ? ` ${fmt(totals.unpricedTokens)} tokens from models without a configured official rate are excluded.`
+      : '';
     insights.push({
       type: 'info',
       title: `Estimated API-equivalent spend: $${totals.totalCost.toFixed(2)}`,
-      detail: `Across ${fmt(totals.totalTokens)} tokens. This is an API-rate estimate, not your subscription bill — useful for comparing where tokens (and cost) concentrate.`,
+      detail: `Across ${fmt(totals.pricedTokens)} priced tokens. This is a standard API-rate estimate, not your subscription bill.${coverage}`,
       action: 'Sort the sessions and prompts tables by tokens to find the few threads driving most of the estimated cost.',
     });
   }
@@ -253,7 +259,8 @@ function buildResult(sessions, source, capabilities, warnings = []) {
   const totals = {
     totalSessions: sessions.length, totalTurns: 0, totalPrompts: 0, totalToolCalls: 0,
     inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0,
-    totalCost: 0, avgTokensPerTurn: 0, avgTokensPerSession: 0, dateRange: null, latestRateLimit: null,
+    totalCost: 0, pricedTokens: 0, unpricedTokens: 0, costCoverage: 1,
+    avgTokensPerTurn: 0, avgTokensPerSession: 0, dateRange: null, latestRateLimit: null,
   };
 
   for (const session of sessions) {
@@ -261,6 +268,8 @@ function buildResult(sessions, source, capabilities, warnings = []) {
     totals.totalPrompts += session.promptCount;
     totals.totalToolCalls += session.toolCount;
     totals.totalCost += session.cost || 0;
+    totals.pricedTokens += session.pricedTokens ?? session.totalTokens ?? 0;
+    totals.unpricedTokens += session.unpricedTokens || 0;
     addMetric(totals, session);
 
     // Bucket by each turn's own date/weekday, not the session's start date — a
@@ -327,7 +336,8 @@ function buildResult(sessions, source, capabilities, warnings = []) {
         sessionId: session.sessionId, title: session.title, project: session.project, date: session.date,
         timestamp: prompt.firstTimestamp, model: prompt.model, prompt: prompt.prompt, turnCount: prompt.turnCount,
         inputTokens: prompt.inputTokens, cachedInputTokens: prompt.cachedInputTokens, outputTokens: prompt.outputTokens,
-        reasoningOutputTokens: prompt.reasoningOutputTokens, totalTokens: prompt.totalTokens, maxTurnTokens: prompt.maxTurnTokens, tools: prompt.tools,
+        reasoningOutputTokens: prompt.reasoningOutputTokens, totalTokens: prompt.totalTokens, cost: prompt.cost,
+        maxTurnTokens: prompt.maxTurnTokens, tools: prompt.tools,
       });
     }
     if (session.rateLimit) totals.latestRateLimit = session.rateLimit;
@@ -339,6 +349,7 @@ function buildResult(sessions, source, capabilities, warnings = []) {
     .sort((a, b) => a.weekday - b.weekday);
   totals.avgTokensPerTurn = totals.totalTurns > 0 ? Math.round(totals.totalTokens / totals.totalTurns) : 0;
   totals.avgTokensPerSession = totals.totalSessions > 0 ? Math.round(totals.totalTokens / totals.totalSessions) : 0;
+  totals.costCoverage = totals.totalTokens > 0 ? totals.pricedTokens / totals.totalTokens : 1;
   totals.dateRange = dailyUsage.length ? { from: dailyUsage[0].date, to: dailyUsage[dailyUsage.length - 1].date } : null;
 
   largestTurns.sort((a, b) => b.totalTokens - a.totalTokens);
@@ -365,7 +376,8 @@ function emptyResult(source, capabilities, warnings) {
     totals: {
       totalSessions: 0, totalTurns: 0, totalPrompts: 0, totalToolCalls: 0,
       inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0,
-      totalCost: 0, avgTokensPerTurn: 0, avgTokensPerSession: 0, dateRange: null, latestRateLimit: null,
+      totalCost: 0, pricedTokens: 0, unpricedTokens: 0, costCoverage: 1,
+      avgTokensPerTurn: 0, avgTokensPerSession: 0, dateRange: null, latestRateLimit: null,
     },
     warnings,
   };

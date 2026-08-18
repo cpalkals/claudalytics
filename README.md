@@ -96,8 +96,15 @@ To add an agent, drop a new adapter module in `src/adapters/`, register it in
 
 ## Notes
 
-Token events expose usage (and, for Codex, rate-limit pressure), not a reliable
-per-token invoice. Costs shown for Claude Code and Codex are **API-rate
-estimates**, not your subscription bill — most Codex CLI usage is billed
-against a ChatGPT plan rather than metered per-token. Reasoning tokens are reported as a subset of output
-tokens (`total = input + output`).
+Token events expose usage (and, for Codex, rate-limit pressure), not an invoice.
+Costs shown for Claude Code and Codex are **standard API-rate equivalents**, not
+your subscription bill — most Codex CLI usage is covered by a ChatGPT plan rather
+than metered per token. The Codex estimate prices fresh, cached, and output tokens
+at the matching model's official rate, including the >272K-token long-context
+surcharge where applicable. Tokens from unknown models are visibly excluded
+instead of being assigned a guessed fallback rate.
+
+Codex's local token events currently do not expose cache-write token counts, so
+the estimate cannot include separately billed cache writes. Reasoning tokens are
+reported as a subset of output tokens (`total = input + output`) and are therefore
+charged once at the output rate.
