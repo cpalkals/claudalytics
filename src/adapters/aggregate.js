@@ -10,6 +10,12 @@ function addMetric(target, source) {
   target.totalTokens += source.totalTokens || 0;
 }
 
+function addCostMetric(target, source) {
+  target.cost += source.cost || 0;
+  if (source.costEstimated === false) target.unpricedTokens += source.totalTokens || 0;
+  else target.pricedTokens += source.totalTokens || 0;
+}
+
 function groupTokenTotals(sessions, key) {
   const out = {};
   for (const session of sessions) {
@@ -241,6 +247,7 @@ function fillDailyGaps(days) {
     filled.push(byDate.get(date) || {
       date, sessions: 0, turns: 0, toolCalls: 0,
       inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0,
+      cost: 0, pricedTokens: 0, unpricedTokens: 0,
     });
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
@@ -279,9 +286,10 @@ function buildResult(sessions, source, capabilities, warnings = []) {
     const weekdaysTouched = new Set();
     for (const turn of session.turns) {
       const day = turn.timestamp ? localDay(turn.timestamp) : session.date;
-      if (!dailyMap[day]) dailyMap[day] = { date: day, sessions: 0, turns: 0, toolCalls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 };
+      if (!dailyMap[day]) dailyMap[day] = { date: day, sessions: 0, turns: 0, toolCalls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0, cost: 0, pricedTokens: 0, unpricedTokens: 0 };
       dailyMap[day].turns += 1;
       addMetric(dailyMap[day], turn);
+      addCostMetric(dailyMap[day], turn);
       daysTouched.add(day);
 
       if (turn.timestamp) {
@@ -292,7 +300,7 @@ function buildResult(sessions, source, capabilities, warnings = []) {
       }
     }
     if (daysTouched.size === 0) {
-      if (!dailyMap[session.date]) dailyMap[session.date] = { date: session.date, sessions: 0, turns: 0, toolCalls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 };
+      if (!dailyMap[session.date]) dailyMap[session.date] = { date: session.date, sessions: 0, turns: 0, toolCalls: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0, cost: 0, pricedTokens: 0, unpricedTokens: 0 };
       daysTouched.add(session.date);
     }
     for (const day of daysTouched) { dailyMap[day].sessions += 1; dailyMap[day].toolCalls += session.toolCount; }
