@@ -37,27 +37,34 @@ function summarizeLimitHits(hits) {
 }
 
 // Anthropic API per-token pricing (estimate; subscription billing differs).
+// Cache rates are the standard 1.25x write / 0.1x read multipliers on input.
+// List rates as of 2026-08-26.
 const MODEL_PRICING = {
-  'opus-4.5': { input: 5 / 1e6, output: 25 / 1e6, cacheWrite: 6.25 / 1e6, cacheRead: 0.50 / 1e6 },
-  'opus-4.6': { input: 5 / 1e6, output: 25 / 1e6, cacheWrite: 6.25 / 1e6, cacheRead: 0.50 / 1e6 },
+  'fable-5': { input: 10 / 1e6, output: 50 / 1e6, cacheWrite: 12.50 / 1e6, cacheRead: 1.00 / 1e6 },
+  'opus-5': { input: 5 / 1e6, output: 25 / 1e6, cacheWrite: 6.25 / 1e6, cacheRead: 0.50 / 1e6 },
   'opus-4.0': { input: 15 / 1e6, output: 75 / 1e6, cacheWrite: 18.75 / 1e6, cacheRead: 1.50 / 1e6 },
-  'opus-4.1': { input: 15 / 1e6, output: 75 / 1e6, cacheWrite: 18.75 / 1e6, cacheRead: 1.50 / 1e6 },
+  'sonnet-5': { input: 2 / 1e6, output: 10 / 1e6, cacheWrite: 2.50 / 1e6, cacheRead: 0.20 / 1e6 },
   sonnet: { input: 3 / 1e6, output: 15 / 1e6, cacheWrite: 3.75 / 1e6, cacheRead: 0.30 / 1e6 },
   'haiku-4.5': { input: 1 / 1e6, output: 5 / 1e6, cacheWrite: 1.25 / 1e6, cacheRead: 0.10 / 1e6 },
   'haiku-3.5': { input: 0.80 / 1e6, output: 4 / 1e6, cacheWrite: 1.00 / 1e6, cacheRead: 0.08 / 1e6 },
 };
 const DEFAULT_PRICING = MODEL_PRICING.sonnet;
+// Model ids arrive dashed (claude-opus-4-6) or dotted (opus-4.6), so every
+// version test below accepts either spelling.
+const PRICING_RULES = [
+  [/(fable|mythos)/, MODEL_PRICING['fable-5']],
+  // Opus 4.5 introduced the $5/$25 tier and every release since has kept it.
+  [/opus-(5|4[-.](5|6|7|8|9))/, MODEL_PRICING['opus-5']],
+  [/opus/, MODEL_PRICING['opus-4.0']],
+  [/sonnet-5/, MODEL_PRICING['sonnet-5']],
+  [/sonnet/, MODEL_PRICING.sonnet],
+  [/3[-.]5-haiku|haiku-3[-.]5/, MODEL_PRICING['haiku-3.5']],
+  [/haiku/, MODEL_PRICING['haiku-4.5']],
+];
 function getPricing(model) {
   if (!model) return DEFAULT_PRICING;
   const m = model.toLowerCase();
-  if (m.includes('opus')) {
-    if (m.includes('4-6') || m.includes('4.6')) return MODEL_PRICING['opus-4.6'];
-    if (m.includes('4-5') || m.includes('4.5')) return MODEL_PRICING['opus-4.5'];
-    if (m.includes('4-1') || m.includes('4.1')) return MODEL_PRICING['opus-4.1'];
-    return MODEL_PRICING['opus-4.0'];
-  }
-  if (m.includes('sonnet')) return MODEL_PRICING.sonnet;
-  if (m.includes('haiku')) return m.includes('4-5') || m.includes('4.5') ? MODEL_PRICING['haiku-4.5'] : MODEL_PRICING['haiku-3.5'];
+  for (const [rx, pricing] of PRICING_RULES) if (rx.test(m)) return pricing;
   return DEFAULT_PRICING;
 }
 
@@ -268,4 +275,4 @@ async function content(session, options = {}) {
   return { items, promptTemplate };
 }
 
-module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content };
+module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content, _test: { getPricing } };

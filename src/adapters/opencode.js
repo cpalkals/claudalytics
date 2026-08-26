@@ -32,8 +32,105 @@ function loadSqlite() {
   try { return require('node:sqlite').DatabaseSync; } catch { return null; }
 }
 
+// Fallback pricing, $ per token, used only to back-fill turns where OpenCode
+// recorded $0 - models with no models.dev entry (custom, local, or proxied
+// providers). Rates are the providers' published list prices as of 2026-08-26.
+// Anthropic/Google/xAI cache rates follow the standard 1.25x write / 0.1x read
+// multipliers; OpenAI bills cache reads at 0.1x and does not charge for writes.
+const M = 1e6;
+const MODEL_PRICING = [
+  // Anthropic
+  [/(fable-5|mythos-5)/, { input: 10 / M, output: 50 / M, cacheWrite: 12.50 / M, cacheRead: 1.00 / M }],
+  [/(opus-5|opus-4[-.]8|opus-4[-.]7|opus-4[-.]6|opus-4[-.]5)/, { input: 5 / M, output: 25 / M, cacheWrite: 6.25 / M, cacheRead: 0.50 / M }],
+  [/opus/, { input: 15 / M, output: 75 / M, cacheWrite: 18.75 / M, cacheRead: 1.50 / M }],
+  [/sonnet-5/, { input: 2 / M, output: 10 / M, cacheWrite: 2.50 / M, cacheRead: 0.20 / M }],
+  [/sonnet/, { input: 3 / M, output: 15 / M, cacheWrite: 3.75 / M, cacheRead: 0.30 / M }],
+  [/haiku-4[-.]5/, { input: 1 / M, output: 5 / M, cacheWrite: 1.25 / M, cacheRead: 0.10 / M }],
+  [/haiku/, { input: 0.80 / M, output: 4 / M, cacheWrite: 1.00 / M, cacheRead: 0.08 / M }],
+  // OpenAI
+  [/gpt-5[-.]5-pro/, { input: 30 / M, output: 180 / M, cacheWrite: 0, cacheRead: 30 / M }],
+  [/gpt-5[-.]6-luna/, { input: 0.20 / M, output: 1.20 / M, cacheWrite: 0, cacheRead: 0.02 / M }],
+  [/gpt-5[-.]6-terra/, { input: 2.00 / M, output: 12 / M, cacheWrite: 0, cacheRead: 0.20 / M }],
+  [/gpt-5[-.](5|6)/, { input: 5.00 / M, output: 30 / M, cacheWrite: 0, cacheRead: 0.50 / M }],
+  [/gpt-5[-.]4-nano/, { input: 0.20 / M, output: 1.25 / M, cacheWrite: 0, cacheRead: 0.02 / M }],
+  [/gpt-5[-.]4-mini/, { input: 0.75 / M, output: 4.50 / M, cacheWrite: 0, cacheRead: 0.075 / M }],
+  [/gpt-5[-.]4/, { input: 2.50 / M, output: 15 / M, cacheWrite: 0, cacheRead: 0.25 / M }],
+  [/gpt-5[-.](2|3)/, { input: 1.75 / M, output: 14 / M, cacheWrite: 0, cacheRead: 0.175 / M }],
+  [/gpt-5/, { input: 1.25 / M, output: 10 / M, cacheWrite: 0, cacheRead: 0.125 / M }],
+  // Google
+  [/gemini-3.*(flash|lite)/, { input: 0.30 / M, output: 2.50 / M, cacheWrite: 0.375 / M, cacheRead: 0.03 / M }],
+  [/gemini-3/, { input: 2.00 / M, output: 12 / M, cacheWrite: 2.50 / M, cacheRead: 0.20 / M }],
+  [/gemini-2[-.]5-pro/, { input: 1.25 / M, output: 10 / M, cacheWrite: 1.5625 / M, cacheRead: 0.125 / M }],
+  [/gemini/, { input: 0.30 / M, output: 2.50 / M, cacheWrite: 0.375 / M, cacheRead: 0.03 / M }],
+  // Others
+  [/grok/, { input: 3.00 / M, output: 15 / M, cacheWrite: 3.75 / M, cacheRead: 0.75 / M }],
+  [/deepseek/, { input: 0.28 / M, output: 1.10 / M, cacheWrite: 0.28 / M, cacheRead: 0.028 / M }],
+  [/(qwen3|qwen-3|kimi|glm-4)/, { input: 0.60 / M, output: 2.20 / M, cacheWrite: 0.60 / M, cacheRead: 0.06 / M }],
+];
+
+// Returns null for models we have no published rate for, so their tokens are
+// reported as unpriced rather than silently costed at somebody else's rate.
+function getPricing(model) {
+  if (!model) return null;
+  const m = String(model).toLowerCase();
+  for (const [rx, pricing] of MODEL_PRICING) if (rx.test(m)) return pricing;
+  return null;
+}
+
+function estimateCost(model, usage) {
+  const pricing = getPricing(model);
+  if (!pricing) return null;
+  return usage.freshInputTokens * pricing.input
+    + usage.cacheWriteTokens * pricing.cacheWrite
+    + usage.cachedInputTokens * pricing.cacheRead
+    + usage.outputTokens * pricing.output;
+}
+
 function safeParse(json) {
   try { return JSON.parse(json); } catch { return {}; }
+}
+
+// OpenCode writes one `step-finish` part per model round-trip, each carrying that
+// step's tokens + cost. The assistant message's own `data.tokens` is OVERWRITTEN on
+// every step (only `cost` accumulates), so a multi-step turn -- any turn with tool
+// calls -- reports just the last step's tokens there. Sum the step-finish parts so
+// per-turn token volume matches the session rollup columns opencode itself keeps
+// (session.tokens_input / tokens_output / tokens_reasoning / tokens_cache_*).
+function usageFromParts(parts, d) {
+  const steps = parts.filter((p) => p && p.type === 'step-finish' && p.tokens);
+  const num = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 0);
+  const acc = { fresh: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+  const add = (tk, cost) => {
+    const cache = tk.cache || {};
+    acc.fresh += num(tk.input);
+    acc.output += num(tk.output);
+    acc.reasoning += num(tk.reasoning);
+    acc.cacheRead += num(cache.read);
+    acc.cacheWrite += num(cache.write);
+    acc.cost += Number.isFinite(Number(cost)) ? Number(cost) : 0;
+  };
+  if (steps.length) {
+    for (const p of steps) add(p.tokens, p.cost);
+    // The message's own cost field is already the sum of every step's cost; prefer it
+    // when present so we stay aligned with what the OpenCode UI shows.
+    if (Number.isFinite(Number(d.cost))) acc.cost = Number(d.cost);
+  } else {
+    add(d.tokens || {}, d.cost);
+  }
+  // tokens.input excludes cache reads/writes and tokens.output excludes reasoning
+  // (see Session.getUsage in opencode), so both flavors add rather than overlap.
+  const input = acc.fresh + acc.cacheRead + acc.cacheWrite;
+  const output = acc.output + acc.reasoning;
+  return {
+    inputTokens: input,
+    freshInputTokens: acc.fresh,
+    cacheWriteTokens: acc.cacheWrite,
+    cachedInputTokens: acc.cacheRead,
+    outputTokens: output,
+    reasoningOutputTokens: acc.reasoning,
+    totalTokens: input + output,
+    recordedCost: acc.cost,
+  };
 }
 
 function toolNameFromPart(d) {
@@ -47,7 +144,11 @@ function toolNameFromPart(d) {
 
 async function parse(options = {}) {
   const file = dbPath(options);
-  const source = { id, label, mark, accent, home: file };
+  const source = {
+    id, label, mark, accent, home: file,
+    costBasis: 'OpenCode’s own models.dev cost, with published list rates filling the gaps',
+    costDisclaimer: 'Per-step cost as OpenCode recorded it; turns it recorded as $0 (custom/local/proxied providers) are back-filled from published list rates. An API-rate ballpark, not a subscription bill — Copilot turns carry an AIU-derived amount instead.',
+  };
   if (!fs.existsSync(file)) return emptyResult(source, capabilities, [{ type: 'missing-dir', message: `OpenCode database not found at ${file}` }]);
   const DatabaseSync = loadSqlite();
   if (!DatabaseSync) return emptyResult(source, capabilities, [{ type: 'no-sqlite', message: 'node:sqlite is unavailable (needs Node 22.5+). Cannot read the OpenCode database.' }]);
@@ -91,23 +192,23 @@ async function parse(options = {}) {
               toolEvents.push({ name, prompt: pendingPrompt, timestamp: m.time_created });
             }
           }
-          const tk = d.tokens || {};
-          const cache = tk.cache || {};
-          const input = (tk.input || 0) + (cache.read || 0) + (cache.write || 0);
-          const reasoning = tk.reasoning || 0;
-          const output = (tk.output || 0) + reasoning;
+          const usage = usageFromParts(parts, d);
+          const model = d.modelID || d.model?.modelID || 'unknown';
+          const { freshInputTokens, cacheWriteTokens, recordedCost, ...tokens } = usage;
+          // Trust OpenCode's own number when it has one (it prices from models.dev at
+          // request time, which beats any table we ship). Back-fill from our own rates
+          // only when it recorded nothing - unpriced, custom, or proxied providers.
+          const estimate = recordedCost > 0 ? null : estimateCost(model, usage);
           turns.push({
             turnId: m.id,
             timestamp: new Date(m.time_created).toISOString(),
             prompt: pendingPrompt,
-            model: d.modelID || d.model?.modelID || 'unknown',
-            inputTokens: input,
-            cachedInputTokens: cache.read || 0,
-            outputTokens: output,
-            reasoningOutputTokens: reasoning,
-            totalTokens: input + output,
+            model,
+            ...tokens,
             contextWindow: null,
-            cost: d.cost || 0,
+            cost: recordedCost > 0 ? recordedCost : (estimate || 0),
+            costEstimated: recordedCost > 0 || estimate !== null,
+            costBackfilled: estimate !== null,
           });
         }
       }
@@ -138,6 +239,9 @@ async function parse(options = {}) {
         reasoningOutputTokens: turns.reduce((a, t) => a + t.reasoningOutputTokens, 0),
         totalTokens: turns.reduce((a, t) => a + t.totalTokens, 0),
         cost: turns.reduce((a, t) => a + (t.cost || 0), 0),
+        pricedTokens: turns.filter((t) => t.costEstimated).reduce((a, t) => a + t.totalTokens, 0),
+        unpricedTokens: turns.filter((t) => !t.costEstimated).reduce((a, t) => a + t.totalTokens, 0),
+        backfilledCost: turns.filter((t) => t.costBackfilled).reduce((a, t) => a + (t.cost || 0), 0),
         contextWindow: null, peakInputTokens: turns.reduce((mx, t) => Math.max(mx, t.inputTokens || 0), 0),
         peakTurnTokens: turns.reduce((mx, t) => Math.max(mx, t.totalTokens || 0), 0), rateLimit: null,
       });
@@ -146,6 +250,15 @@ async function parse(options = {}) {
     warnings.push({ type: 'query-failed', message: `OpenCode database query failed: ${err.message}` });
   } finally {
     try { db.close(); } catch { /* */ }
+  }
+
+  const backfilled = sessions.reduce((a, s) => a + (s.backfilledCost || 0), 0);
+  const unpriced = sessions.reduce((a, s) => a + (s.unpricedTokens || 0), 0);
+  if (backfilled > 0) {
+    warnings.push({ type: 'cost-backfilled', message: `OpenCode recorded $0 for some turns (providers with no models.dev pricing); about $${backfilled.toFixed(2)} of the cost shown is estimated here from published list rates.` });
+  }
+  if (unpriced > 0) {
+    warnings.push({ type: 'cost-unpriced', message: `${unpriced.toLocaleString()} tokens ran on models with no rate on record — they are excluded from the cost total.` });
   }
 
   if (!sessions.length) return emptyResult(source, capabilities, warnings.length ? warnings : [{ type: 'no-sessions', message: 'No OpenCode sessions found yet. Use OpenCode and refresh.' }]);
@@ -183,4 +296,4 @@ async function content(session, options = {}) {
   return { items };
 }
 
-module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content };
+module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content, _test: { usageFromParts, getPricing, estimateCost } };
