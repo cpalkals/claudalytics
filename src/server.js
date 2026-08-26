@@ -50,8 +50,26 @@ function scopeToRange(full, range) {
   return buildResult(scoped, full.source, full.capabilities, full.warnings);
 }
 
+// The dashboard is a local page, so any request that changes server state must
+// prove it came from that page rather than from some other site the browser has
+// open. A same-origin (or origin-less) request plus a header no cross-site form
+// can set is enough here; the port is loopback-only by default.
+function localOnly(req, res, next) {
+  const origin = req.get('origin');
+  if (origin) {
+    let host;
+    try { host = new URL(origin).hostname; } catch { host = null; }
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '[::1]' && host !== '::1') {
+      return res.status(403).json({ error: 'Cross-site requests are not allowed.' });
+    }
+  }
+  if (req.get('x-metrascope') !== '1') return res.status(403).json({ error: 'Missing dashboard request header.' });
+  return next();
+}
+
 function createServer(options = {}) {
   const app = express();
+  app.use(express.json({ limit: '8kb' }));
   const cache = {}; // sourceId -> parsed result (always unfiltered / "all")
 
   function friendlyError(err) {
@@ -99,10 +117,29 @@ function createServer(options = {}) {
   });
 
   // Real OpenRouter spend for the current range, to sit beside the local
-  // estimate. Off unless OPENROUTER_API_KEY is set; the key is read from the
-  // environment inside the module and never travels back to the browser.
+  // estimate. Off until a key is configured — typed into the dashboard, saved
+  // by the user, or in OPENROUTER_API_KEY. The key is resolved inside the
+  // module and never travels back to the browser.
   const spendCache = new Map(); // range -> { at, payload }
   const SPEND_TTL_MS = 5 * 60 * 1000;
+
+  // Key management for the dashboard's OpenRouter panel. The key itself is
+  // write-only across this boundary: it goes in, and only a masked label and an
+  // origin ever come back out.
+  app.get('/api/openrouter/key', (req, res) => res.json(openrouter.status()));
+
+  app.post('/api/openrouter/key', localOnly, async (req, res) => {
+    const { key, remember } = req.body || {};
+    const result = await openrouter.setKey(key, { remember: Boolean(remember) });
+    spendCache.clear();
+    res.status(result.ok ? 200 : 400).json(result);
+  });
+
+  app.delete('/api/openrouter/key', localOnly, (req, res) => {
+    const result = openrouter.clearKey();
+    spendCache.clear();
+    res.json(result);
+  });
 
   app.get('/api/openrouter', async (req, res) => {
     const range = ['day', 'week', 'month', 'all'].includes(req.query.range) ? req.query.range : 'all';

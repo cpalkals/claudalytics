@@ -1,31 +1,119 @@
 // OpenRouter spend lookup — turns the local token estimate into a reconciliation
 // against what OpenRouter actually billed.
 //
-// The key is read from the environment on every call and never written anywhere:
-// no config file, no cache on disk, and it is not included in any API response
-// (only a masked label OpenRouter itself returns).
+// The key can come from three places, in this order of precedence:
+//   1. a key typed into the dashboard this run (memory only, gone on restart)
+//   2. a key the user explicitly chose to remember (0600 file under ~/.metrascope)
+//   3. OPENROUTER_API_KEY in the environment
+// Nothing is written to disk unless the user ticks "remember", and the key is
+// never included in an API response — only the masked label OpenRouter returns.
 //
 // Scope caveats, surfaced in the payload so the UI can state them:
 //  - Figures are per API key, so they include any non-OpenCode traffic on it.
 //  - OpenRouter buckets by UTC day; this dashboard buckets by local day.
 //  - Per-request reconciliation is impossible: OpenRouter's exact per-generation
 //    cost needs a generation id, and OpenCode never records one.
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
 const BASE = 'https://openrouter.ai/api/v1';
 const TIMEOUT_MS = 8000;
 
-function apiKey() {
+function configPath() {
+  return path.join(process.env.METRASCOPE_HOME || path.join(os.homedir(), '.metrascope'), 'openrouter.json');
+}
+
+// Set from the dashboard; deliberately process-local so the default path leaves
+// no trace on disk.
+let sessionKey = null;
+
+function savedKey() {
+  try {
+    const raw = fs.readFileSync(configPath(), 'utf8');
+    const key = (JSON.parse(raw).key || '').trim();
+    return key || null;
+  } catch { return null; }
+}
+
+function envKey() {
   const key = (process.env.OPENROUTER_API_KEY || '').trim();
   return key || null;
+}
+
+// Precedence: this run's key, then a remembered one, then the environment.
+function resolveKey() {
+  if (sessionKey) return { key: sessionKey, origin: 'session' };
+  const saved = savedKey();
+  if (saved) return { key: saved, origin: 'saved' };
+  const env = envKey();
+  if (env) return { key: env, origin: 'env' };
+  return { key: null, origin: null };
+}
+
+function apiKey() {
+  return resolveKey().key;
 }
 
 function enabled() {
   return apiKey() !== null;
 }
 
-async function callApi(path, key) {
+// Never echo a key back; this is only enough to recognise which one is loaded.
+function mask(key) {
+  if (!key) return null;
+  return key.length <= 12 ? '…' + key.slice(-4) : `${key.slice(0, 8)}…${key.slice(-4)}`;
+}
+
+function status() {
+  const { key, origin } = resolveKey();
+  return {
+    configured: Boolean(key),
+    origin,
+    masked: mask(key),
+    // An env-supplied key cannot be cleared from the UI - it would come straight
+    // back on the next read.
+    removable: origin === 'session' || origin === 'saved',
+    remembered: savedKey() !== null,
+    configPath: configPath(),
+  };
+}
+
+// Checks the key against OpenRouter before accepting it, so a typo surfaces
+// immediately rather than as an empty card later.
+async function setKey(key, { remember = false } = {}) {
+  const trimmed = String(key || '').trim();
+  if (!trimmed) return { ok: false, error: 'Enter an OpenRouter API key.' };
+  if (!/^sk-or-/.test(trimmed)) return { ok: false, error: 'That does not look like an OpenRouter key — they start with "sk-or-".' };
+
+  const probe = await callApi('/key', trimmed);
+  if (!probe.ok) return { ok: false, error: `OpenRouter rejected the key: ${probe.error}` };
+
+  sessionKey = trimmed;
+  if (remember) {
+    try {
+      const file = configPath();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ key: trimmed }, null, 2), { mode: 0o600 });
+      try { fs.chmodSync(file, 0o600); } catch { /* best effort on Windows */ }
+    } catch (err) {
+      return { ok: true, saved: false, status: status(), warning: `Key accepted for this session, but saving it failed: ${err.message}` };
+    }
+  }
+  return { ok: true, saved: Boolean(remember), status: status() };
+}
+
+function clearKey() {
+  sessionKey = null;
+  let removed = false;
+  try { fs.unlinkSync(configPath()); removed = true; } catch { /* nothing saved */ }
+  return { ok: true, removed, status: status() };
+}
+
+async function callApi(endpoint, key) {
   let res;
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetch(`${BASE}${endpoint}`, {
       headers: { Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
@@ -163,6 +251,7 @@ async function fetchSpend(range = 'all') {
     enabled: true,
     ok: true,
     range,
+    key: status(),
     keyLabel: info.label || null,
     isManagement,
     cost,
@@ -186,4 +275,4 @@ async function fetchSpend(range = 'all') {
   };
 }
 
-module.exports = { enabled, fetchSpend, _test: { normalizeActivity, summarizeActivity, spendFromKey, utcDaysForRange } };
+module.exports = { enabled, fetchSpend, status, setKey, clearKey, _test: { normalizeActivity, summarizeActivity, spendFromKey, utcDaysForRange, mask, configPath, resetSession: () => { sessionKey = null; } } };

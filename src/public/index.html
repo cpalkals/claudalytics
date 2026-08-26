@@ -269,6 +269,13 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 .or-models th,.or-models td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left}
 .or-models th{color:var(--muted);font-weight:600}
 .or-note{margin-top:10px;font-size:11px;color:var(--faint);line-height:1.5}
+.or-connect{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.or-input{flex:1 1 260px;min-width:200px;padding:8px 10px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink);font-family:var(--mono);font-size:12px}
+.or-input:focus{outline:2px solid var(--focus);outline-offset:1px}
+.or-remember{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.or-err{margin-top:10px;font-size:12px;color:var(--rose)}
+.or-x{margin-left:2px;font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--line-2);background:transparent;color:var(--muted);cursor:pointer}
+.or-x:hover:not(:disabled){color:var(--ink);border-color:var(--line)}
 </style>
 </head>
 <body>
@@ -296,7 +303,9 @@ let activeTab=localStorage.getItem('codex-spend-tab')||'overview';
 let selectedSessionId=null, selectedPromptRank=null, rlTimer=null;
 let theme=localStorage.getItem('codex-spend-theme')||'dark';
 let range=localStorage.getItem('metrascope-range')||'all';
-let SPEND=null; // real OpenRouter spend, when OPENROUTER_API_KEY is set
+let SPEND=null; // real OpenRouter spend, once a key is configured
+let ORKEY=null; // {configured, origin, masked, removable, remembered}
+let orBusy=false, orError='';
 document.documentElement.dataset.theme=theme;
 const caps=()=>DATA&&DATA.capabilities||{};
 const cssVar=name=>getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -356,19 +365,64 @@ async function fetchData(refresh=false){
 // has already painted and patches itself in when it lands.
 async function loadSpend(seq,force){
   try{
-    const r=await fetch('/api/openrouter?range='+encodeURIComponent(range)+(force?'&force=1':''));
-    const j=await r.json();
-    if(seq!==requestSeq)return;
-    SPEND=j&&j.enabled?j:null;
+    ORKEY=await(await fetch('/api/openrouter/key')).json();
+    if(seq!==requestSeq&&seq!==undefined)return;
+    if(ORKEY&&ORKEY.configured){
+      const j=await(await fetch('/api/openrouter?range='+encodeURIComponent(range)+(force?'&force=1':''))).json();
+      if(seq!==requestSeq&&seq!==undefined)return;
+      SPEND=j&&j.enabled?j:null;
+    } else SPEND=null;
     paintSpend();
-  }catch{ if(seq===requestSeq){SPEND=null;paintSpend()} }
+  }catch{ if(seq===requestSeq||seq===undefined){SPEND=null;paintSpend()} }
 }
-function paintSpend(){const el=document.getElementById('spendWrap');if(el)el.innerHTML=spendCard()}
+
+// The dashboard's own mutating calls carry this header; cross-site requests
+// cannot set it, and the server rejects anything without it.
+const orPost=(method,body)=>fetch('/api/openrouter/key',{method,headers:{'Content-Type':'application/json','X-Metrascope':'1'},body:body?JSON.stringify(body):undefined});
+
+async function connectOpenRouter(){
+  const input=document.getElementById('orKeyInput');const remember=document.getElementById('orRemember');
+  if(!input)return;
+  const key=input.value.trim();
+  if(!key){orError='Enter an OpenRouter API key.';paintSpend();return}
+  orBusy=true;orError='';paintSpend();
+  try{
+    const res=await orPost('POST',{key,remember:remember&&remember.checked});
+    const j=await res.json();
+    if(!res.ok||!j.ok){orError=j.error||'Could not verify that key.';ORKEY=j.status||ORKEY}
+    else{orError=j.warning||'';ORKEY=j.status}
+  }catch(e){orError='Could not reach the local server.'}
+  orBusy=false;
+  await loadSpend(undefined,true);
+  paintSpend();
+}
+
+async function disconnectOpenRouter(){
+  orBusy=true;orError='';paintSpend();
+  try{const j=await(await orPost('DELETE')).json();ORKEY=j.status}
+  catch{orError='Could not reach the local server.'}
+  orBusy=false;SPEND=null;paintSpend();
+}
+// Repaints (auto-refresh, range change) must not eat a key the user is midway
+// through typing, so the field's value, focus and caret are carried across.
+function paintSpend(){
+  const el=document.getElementById('spendWrap');if(!el)return;
+  const prev=document.getElementById('orKeyInput');
+  const kept=prev?{value:prev.value,focused:document.activeElement===prev,start:prev.selectionStart,end:prev.selectionEnd,remember:!!(document.getElementById('orRemember')||{}).checked}:null;
+  el.innerHTML=spendCard();
+  if(!kept)return;
+  const next=document.getElementById('orKeyInput');if(!next)return;
+  next.value=kept.value;
+  const rem=document.getElementById('orRemember');if(rem)rem.checked=kept.remember;
+  if(kept.focused){next.focus();try{next.setSelectionRange(kept.start,kept.end)}catch{}}
+}
 function spendCard(){
   // OpenRouter is the provider behind OpenCode here. Putting its account-wide
   // spend next to, say, Claude Code's estimate would compare unrelated numbers.
-  if(!SPEND||!DATA||!DATA.source||DATA.source.id!=='opencode')return'';
-  if(!SPEND.ok)return`<div class="warnbox">${esc((SPEND.warnings||['OpenRouter lookup failed.'])[0])}</div>`;
+  if(!DATA||!DATA.source||DATA.source.id!=='opencode')return'';
+  if(!ORKEY||!ORKEY.configured)return connectCard();
+  if(!SPEND)return`<div class="card or-card anim"><div class="or-head"><div><span class="or-title">OpenRouter actual</span> <span class="muted">loading…</span></div>${keyControls()}</div></div>`;
+  if(!SPEND.ok)return`<div class="card or-card anim"><div class="or-head"><div><span class="or-title">OpenRouter actual</span></div>${keyControls()}</div><div class="or-note">${esc((SPEND.warnings||['OpenRouter lookup failed.'])[0])}</div></div>`;
   const actual=Number(SPEND.cost||0), est=Number((DATA&&DATA.totals&&DATA.totals.totalCost)||0);
   const delta=actual-est, pct=actual>0?Math.round(delta/actual*100):null;
   const label=RANGE_LABEL[range]||'All time';
@@ -382,7 +436,7 @@ function spendCard(){
   return`<div class="card or-card anim">
     <div class="or-head">
       <div><span class="or-title">OpenRouter actual</span> <span class="muted">${esc(label)}${SPEND.keyLabel?' · key '+esc(SPEND.keyLabel):''}</span></div>
-      <div class="or-chips">${credits}${limit}${SPEND.isManagement?'':'<span class="or-chip">inference key</span>'}</div>
+      <div class="or-chips">${credits}${limit}${SPEND.isManagement?'':'<span class="or-chip">inference key</span>'}${keyControls()}</div>
     </div>
     <div class="or-figures">
       <div class="or-fig"><div class="label">Billed by OpenRouter</div><div class="value">${fmtCost(actual)}</div><div class="hint">${SPEND.requests!=null?fmt(SPEND.requests)+' requests':'&nbsp;'}</div></div>
@@ -392,6 +446,25 @@ function spendCard(){
     ${models.length?`<table class="or-models"><thead><tr><th>Model</th><th class="num">Requests</th><th class="num">Tokens</th><th class="num">Billed</th></tr></thead><tbody>${models.map(m=>`<tr><td>${esc(m.model)}</td><td class="num">${fmt(m.requests)}</td><td class="num">${fmt(m.tokens)}</td><td class="num">${fmtCost(m.cost)}</td></tr>`).join('')}</tbody></table>`:''}
     <div class="or-note">${(SPEND.caveats||[]).concat(SPEND.warnings||[]).map(esc).join(' ')}</div>
   </div>`;
+}
+
+function connectCard(){
+  return`<div class="card or-card anim">
+    <div class="or-head"><div><span class="or-title">Connect OpenRouter</span> <span class="muted">compare what you were actually billed against the estimate</span></div></div>
+    <div class="or-connect">
+      <input id="orKeyInput" class="or-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-v1-…" onkeydown="if(event.key==='Enter')connectOpenRouter()">
+      <label class="or-remember"><input type="checkbox" id="orRemember"> Remember on this machine</label>
+      <button class="btn primary" ${orBusy?'disabled':''} onclick="connectOpenRouter()">${orBusy?'Checking…':'Connect'}</button>
+    </div>
+    ${orError?`<div class="or-err">${esc(orError)}</div>`:''}
+    <div class="or-note">The key is verified with OpenRouter, then kept in this dashboard's memory for as long as it is running. Ticking remember writes it to ${esc((ORKEY&&ORKEY.configPath)||'~/.metrascope/openrouter.json')} instead. It is never sent back to this page. A management key adds a 30-day per-model breakdown; an ordinary inference key gives rolling totals.</div>
+  </div>`;
+}
+function keyControls(){
+  if(!ORKEY||!ORKEY.configured)return'';
+  const where=ORKEY.origin==='env'?'from OPENROUTER_API_KEY':ORKEY.origin==='saved'?'saved on this machine':'this session only';
+  return`<span class="or-chip" title="${esc(where)}">${esc(ORKEY.masked||'key set')} · ${esc(where)}</span>`
+    +(ORKEY.removable?`<button class="or-x" ${orBusy?'disabled':''} onclick="disconnectOpenRouter()" title="Forget this key">Disconnect</button>`:'');
 }
 
 function headerInner(t,src){return`<div class="brand"><img class="logo" src="/favicon.svg" alt="Claudalytics" width="38" height="38"><div><h1>Claudalytics</h1><div class="sub" title="${esc(src.home||'')}">${esc(src.label||'')} · ${esc(src.home||'')}${t.dateRange?' · '+t.dateRange.from+' → '+t.dateRange.to:''}</div></div></div><div class="actions"><button class="btn" onclick="toggleTheme()">${theme==='dark'?'☀ Light':'☾ Dark'}</button><button class="btn" onclick="openShare()">Share</button><button class="btn" onclick="cycleAutoRefresh()" title="Auto-refresh cadence">${autoRefreshMs?'⏱ Auto '+(autoRefreshMs/1000)+'s':'⏱ Auto Off'}</button><button class="btn primary" onclick="refresh()">↻ Refresh</button></div>`}

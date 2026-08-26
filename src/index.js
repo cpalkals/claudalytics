@@ -22,6 +22,7 @@ Usage:
 
 Options:
   --port <port>          Port to run dashboard on (default: 3457)
+  --host <host>          Interface to bind (default: 127.0.0.1, this machine only)
   --codex-home <path>    Override Codex home (default: CODEX_HOME or ~/.codex)
   --no-open              Do not auto-open the browser
   --help, -h             Show this help message
@@ -29,11 +30,12 @@ Options:
 Per-agent homes can also be set via env: CODEX_HOME, CLAUDE_HOME,
 QWEN_HOME, GEMINI_HOME.
 
-Set OPENROUTER_API_KEY to show what OpenRouter actually billed beside the
-local estimate on the OpenCode view. The key is read from the environment,
-never written to disk, and never sent to the browser. A management key also
-adds a 30-day per-model breakdown; a normal inference key gives rolling
-day/week/month totals.
+To show what OpenRouter actually billed beside the local estimate on the
+OpenCode view, either set OPENROUTER_API_KEY or paste a key into the panel on
+that view. A pasted key stays in this process's memory unless you tick
+"remember", which writes it to ~/.metrascope/openrouter.json. The key is never
+sent back to the browser. A management key also adds a 30-day per-model
+breakdown; a normal inference key gives rolling day/week/month totals.
 
 Examples:
   claudalytics
@@ -46,6 +48,9 @@ Examples:
 const port = parseInt(readOption(args, '--port') || '3457', 10);
 const codexHome = readOption(args, '--codex-home') || process.env.CODEX_HOME || null;
 const noOpen = args.includes('--no-open');
+// Loopback by default: the dashboard exposes local session content and can hold
+// an OpenRouter key in memory, neither of which belongs on a shared network.
+const host = readOption(args, '--host') || '127.0.0.1';
 
 if (!Number.isInteger(port) || port <= 0 || port > 65535) {
   console.error('Error: --port must be a valid port number');
@@ -54,7 +59,7 @@ if (!Number.isInteger(port) || port <= 0 || port > 65535) {
 
 const app = createServer({ codexHome });
 
-const server = app.listen(port, async () => {
+const server = app.listen(port, host, async () => {
   const url = `http://localhost:${port}`;
   console.log(`\n  claudalytics dashboard running at ${url}\n`);
 
