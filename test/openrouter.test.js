@@ -105,7 +105,7 @@ test('a management key uses analytics, not its own zero usage counters', async (
     const u = String(url);
     // A management key never makes inference calls, so every usage counter on it
     // reads 0 - the bug this test pins down.
-    if (u.endsWith('/key')) return { ok: true, status: 200, json: async () => ({ data: { label: 'sk-or-v1-954...280', is_management_key: true, usage: 0, usage_daily: 0, usage_weekly: 0, usage_monthly: 0 } }) };
+    if (u.endsWith('/key')) return { ok: true, status: 200, json: async () => ({ data: { label: 'sk-or-v1-abc...xyz', is_management_key: true, usage: 0, usage_daily: 0, usage_weekly: 0, usage_monthly: 0 } }) };
     if (u.includes('/analytics/query')) {
       const body = JSON.parse(init.body);
       queries.push(body);
@@ -115,7 +115,7 @@ test('a management key uses analytics, not its own zero usage counters', async (
           { date__day: '2026-08-26', model: 'deepseek/deepseek-v4-flash-20260731', total_usage: 0.252879, request_count: '264', tokens_prompt: '14700000', tokens_completion: '12454', reasoning_tokens: '0', cached_tokens: '900000' },
         ]
         : [
-          { created_at__day: '2026-08-26', session_id: 'ses_fc021dc76ffenMg6hPE67Ew5f5', total_usage: 0.388883, request_count: '9', tokens_prompt: '340000', tokens_completion: '12319' },
+          { created_at__day: '2026-08-26', session_id: 'ses_00000000000example000000', total_usage: 0.388883, request_count: '9', tokens_prompt: '340000', tokens_completion: '12319' },
           { created_at__day: '2026-08-26', session_id: 'none', total_usage: 0.000654, request_count: '1', tokens_prompt: '253', tokens_completion: '0' },
         ];
       return { ok: true, status: 200, json: async () => ({ data: { data: rows, metadata: { row_count: rows.length } } }) };
@@ -135,7 +135,7 @@ test('a management key uses analytics, not its own zero usage counters', async (
   // OpenCode's session ids arrive as an analytics dimension, so real cost can be
   // attributed per session; rows with no session are dropped.
   assert.equal(out.bySession.length, 1);
-  assert.equal(out.bySession[0].sessionId, 'ses_fc021dc76ffenMg6hPE67Ew5f5');
+  assert.equal(out.bySession[0].sessionId, 'ses_00000000000example000000');
   assert.equal(out.bySession[0].tokens, 352319);
 
   assert.deepEqual(queries.map((q) => q.dimensions[0]), ['model', 'session_id']);
