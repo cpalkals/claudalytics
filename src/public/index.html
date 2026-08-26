@@ -270,7 +270,10 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 .or-models th{color:var(--muted);font-weight:600}
 .or-note{margin-top:10px;font-size:11px;color:var(--faint);line-height:1.5}
 .or-connect{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.or-input{flex:1 1 260px;min-width:200px;padding:8px 10px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink);font-family:var(--mono);font-size:12px}
+.or-input{flex:1 1 260px;min-width:200px;padding:8px 10px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink);font-family:var(--mono);font-size:12px;-webkit-text-security:disc;text-security:disc}
+/* Fallback for engines without text-security: keep the key unreadable by
+   rendering it in a dot-only font substitute rather than showing it in clear. */
+@supports not (-webkit-text-security:disc){.or-input{-webkit-text-fill-color:transparent;text-shadow:0 0 6px var(--ink)}}
 .or-input:focus{outline:2px solid var(--focus);outline-offset:1px}
 .or-remember{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
 .or-err{margin-top:10px;font-size:12px;color:var(--rose)}
@@ -452,7 +455,7 @@ function connectCard(){
   return`<div class="card or-card anim">
     <div class="or-head"><div><span class="or-title">Connect OpenRouter</span> <span class="muted">compare what you were actually billed against the estimate</span></div></div>
     <div class="or-connect">
-      <input id="orKeyInput" class="or-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-or-v1-…" onkeydown="if(event.key==='Enter')connectOpenRouter()">
+      <input id="orKeyInput" class="or-input" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other" placeholder="sk-or-v1-…" aria-label="OpenRouter API key" onkeydown="if(event.key==='Enter')connectOpenRouter()">
       <label class="or-remember"><input type="checkbox" id="orRemember"> Remember on this machine</label>
       <button class="btn primary" ${orBusy?'disabled':''} onclick="connectOpenRouter()">${orBusy?'Checking…':'Connect'}</button>
     </div>
