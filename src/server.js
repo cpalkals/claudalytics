@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const registry = require('./adapters');
+const openrouter = require('./openrouter');
 const { buildResult, buildPromptBreakdown } = require('./adapters/aggregate');
 const { localDay } = require('./adapters/shared');
 
@@ -92,6 +93,26 @@ function createServer(options = {}) {
     try {
       cache[sourceId] = await readSource(sourceId);
       res.json({ ok: true, source: sourceId, sessions: cache[sourceId].sessions.length });
+    } catch (err) {
+      res.status(500).json(friendlyError(err));
+    }
+  });
+
+  // Real OpenRouter spend for the current range, to sit beside the local
+  // estimate. Off unless OPENROUTER_API_KEY is set; the key is read from the
+  // environment inside the module and never travels back to the browser.
+  const spendCache = new Map(); // range -> { at, payload }
+  const SPEND_TTL_MS = 5 * 60 * 1000;
+
+  app.get('/api/openrouter', async (req, res) => {
+    const range = ['day', 'week', 'month', 'all'].includes(req.query.range) ? req.query.range : 'all';
+    if (!openrouter.enabled()) return res.json({ enabled: false });
+    const hit = spendCache.get(range);
+    if (hit && Date.now() - hit.at < SPEND_TTL_MS && !req.query.force) return res.json(hit.payload);
+    try {
+      const payload = await openrouter.fetchSpend(range);
+      spendCache.set(range, { at: Date.now(), payload });
+      res.json(payload);
     } catch (err) {
       res.status(500).json(friendlyError(err));
     }

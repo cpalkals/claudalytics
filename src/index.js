@@ -29,6 +29,12 @@ Options:
 Per-agent homes can also be set via env: CODEX_HOME, CLAUDE_HOME,
 QWEN_HOME, GEMINI_HOME.
 
+Set OPENROUTER_API_KEY to show what OpenRouter actually billed beside the
+local estimate on the OpenCode view. The key is read from the environment,
+never written to disk, and never sent to the browser. A management key also
+adds a 30-day per-model breakdown; a normal inference key gives rolling
+day/week/month totals.
+
 Examples:
   claudalytics
   claudalytics --port 8080
