@@ -465,7 +465,8 @@ function connectCard(){
       <button class="btn primary" ${orBusy?'disabled':''} onclick="connectOpenRouter()">${orBusy?'Checking…':'Connect'}</button>
     </div>
     ${orError?`<div class="or-err">${esc(orError)}</div>`:''}
-    <div class="or-note">The key is verified with OpenRouter, then kept in this dashboard's memory for as long as it is running. Ticking remember writes it to ${esc((ORKEY&&ORKEY.configPath)||'~/.metrascope/openrouter.json')} instead. It is never sent back to this page. A management key adds a 30-day per-model breakdown; an ordinary inference key gives rolling totals.</div>
+    <div class="or-note">The key is verified with OpenRouter, then kept in this dashboard's memory for as long as it is running. Ticking remember writes it to ${esc((ORKEY&&ORKEY.configPath)||'~/.metrascope/openrouter.json')} instead. It is never sent back to this page.</div>
+    <div class="or-note"><b>Which key?</b> Paste a <b>management key</b> (OpenRouter → Settings → Keys) to get per-session and per-model cost on your own calendar. An ordinary inference key works too, but only reports its own rolling totals. Either way, keep using your normal inference key inside the agent itself — a management key cannot make requests, and it <i>can</i> create and delete keys, so it belongs here and nowhere else.</div>
   </div>`;
 }
 // OpenRouter's day/week/month counters roll over at UTC midnight, which lands
