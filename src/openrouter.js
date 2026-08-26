@@ -251,6 +251,9 @@ async function fetchSpend(range = 'all') {
     enabled: true,
     ok: true,
     range,
+    // The rolling counters update within seconds of a request, so the figure is
+    // live as of this moment - worth stating, since the card can sit on screen.
+    asOf: new Date().toISOString(),
     key: status(),
     keyLabel: info.label || null,
     isManagement,

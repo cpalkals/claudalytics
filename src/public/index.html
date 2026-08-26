@@ -278,6 +278,7 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 .or-remember{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
 .or-err{margin-top:10px;font-size:12px;color:var(--rose)}
 .or-x{margin-left:2px;font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--line-2);background:transparent;color:var(--muted);cursor:pointer}
+.or-asof{font-size:11px}
 .or-x:hover:not(:disabled){color:var(--ink);border-color:var(--line)}
 </style>
 </head>
@@ -434,11 +435,12 @@ function spendCard(){
     :Math.abs(pct)<=10?`within ${Math.abs(pct)}% of the estimate`
     :`estimate is ${pct>0?'under':'over'} by ${Math.abs(pct)}%`;
   const models=(SPEND.byModel||[]).slice(0,5);
+  const windowNote=orWindowNote();
   const credits=SPEND.credits?`<span class="or-chip">$${SPEND.credits.remaining.toFixed(2)} credits left</span>`:'';
   const limit=SPEND.limit?`<span class="or-chip">$${SPEND.limit.remaining.toFixed(2)} of $${SPEND.limit.cap.toFixed(2)} cap${SPEND.limit.reset?' ('+esc(SPEND.limit.reset)+')':''}</span>`:'';
   return`<div class="card or-card anim">
     <div class="or-head">
-      <div><span class="or-title">OpenRouter actual</span> <span class="muted">${esc(label)}${SPEND.keyLabel?' · key '+esc(SPEND.keyLabel):''}</span></div>
+      <div><span class="or-title">OpenRouter actual</span> <span class="muted">${esc(label)}${windowNote?' · '+esc(windowNote):''}</span> <button class="or-x" ${orBusy?'disabled':''} onclick="refreshSpend()" title="Fetch the latest figures from OpenRouter">${orBusy?'…':'↻'}</button> <span class="muted or-asof">${esc(orAsOf())}</span></div>
       <div class="or-chips">${credits}${limit}${SPEND.isManagement?'':'<span class="or-chip">inference key</span>'}${keyControls()}</div>
     </div>
     <div class="or-figures">
@@ -463,6 +465,26 @@ function connectCard(){
     <div class="or-note">The key is verified with OpenRouter, then kept in this dashboard's memory for as long as it is running. Ticking remember writes it to ${esc((ORKEY&&ORKEY.configPath)||'~/.metrascope/openrouter.json')} instead. It is never sent back to this page. A management key adds a 30-day per-model breakdown; an ordinary inference key gives rolling totals.</div>
   </div>`;
 }
+// OpenRouter's day/week/month counters roll over at UTC midnight, which lands
+// mid-evening in the Americas. Say when that is in the viewer's own clock
+// rather than letting "Today" quietly mean something else.
+function orWindowNote(){
+  if(range==='all')return'';
+  const now=new Date();
+  const next=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()+1));
+  const local=next.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+  const unit=range==='day'?'UTC day':range==='week'?'UTC week':'UTC month';
+  return range==='day'?`${unit}, resets ${local} your time`:`${unit} to date`;
+}
+function orAsOf(){
+  if(!SPEND||!SPEND.asOf)return'';
+  const secs=Math.max(0,Math.round((Date.now()-new Date(SPEND.asOf).getTime())/1000));
+  if(secs<90)return'live · just now';
+  const mins=Math.round(secs/60);
+  return mins<60?`as of ${mins} min ago`:`as of ${Math.round(mins/60)} h ago`;
+}
+async function refreshSpend(){orBusy=true;paintSpend();await loadSpend(undefined,true);orBusy=false;paintSpend()}
+
 function keyControls(){
   if(!ORKEY||!ORKEY.configured)return'';
   const where=ORKEY.origin==='env'?'from OPENROUTER_API_KEY':ORKEY.origin==='saved'?'saved on this machine':'this session only';
