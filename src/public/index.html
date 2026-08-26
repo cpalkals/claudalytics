@@ -269,6 +269,8 @@ tbody tr:hover td{background:color-mix(in srgb,var(--surface-2) 70%,transparent)
 .or-models th,.or-models td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left}
 .or-models th{color:var(--muted);font-weight:600}
 .or-note{margin-top:10px;font-size:11px;color:var(--faint);line-height:1.5}
+.or-matched{margin-top:12px;font-size:12px;color:var(--muted)}
+.badge.billed{background:var(--green-bg);border:1px solid var(--green-border);color:var(--green)}
 .or-connect{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .or-input{flex:1 1 260px;min-width:200px;padding:8px 10px;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink);font-family:var(--mono);font-size:12px;-webkit-text-security:disc;text-security:disc}
 /* Fallback for engines without text-security: keep the key unreadable by
@@ -449,6 +451,7 @@ function spendCard(){
       <div class="or-fig"><div class="label">Difference</div><div class="value ${delta>0?'up':delta<0?'down':''}">${delta>=0?'+':'−'}${fmtCost(Math.abs(delta))}</div><div class="hint">actual minus estimate</div></div>
     </div>
     ${models.length?`<table class="or-models"><thead><tr><th>Model</th><th class="num">Requests</th><th class="num">Tokens</th><th class="num">Billed</th></tr></thead><tbody>${models.map(m=>`<tr><td>${esc(m.model)}</td><td class="num">${fmt(m.requests)}</td><td class="num">${fmt(m.tokens)}</td><td class="num">${fmtCost(m.cost)}</td></tr>`).join('')}</tbody></table>`:''}
+    ${matchedNote()?`<div class="or-matched">${esc(matchedNote())}</div>`:''}
     <div class="or-note">${(SPEND.caveats||[]).concat(SPEND.warnings||[]).map(esc).join(' ')}</div>
   </div>`;
 }
@@ -484,6 +487,22 @@ function orAsOf(){
   return mins<60?`as of ${mins} min ago`:`as of ${Math.round(mins/60)} h ago`;
 }
 async function refreshSpend(){orBusy=true;paintSpend();await loadSpend(undefined,true);orBusy=false;paintSpend()}
+
+// OpenCode sends its session id upstream, so OpenRouter can report what a given
+// session really cost. Null when the session predates the window or ran on
+// another account.
+function billedForSession(sessionId){
+  if(!SPEND||!SPEND.bySession)return null;
+  return SPEND.bySession.find(r=>r.sessionId===sessionId)||null;
+}
+function matchedNote(){
+  if(!SPEND||!SPEND.bySession||!SPEND.bySession.length||!DATA)return'';
+  const local=new Set((DATA.sessions||[]).map(s=>s.sessionId));
+  const matched=SPEND.bySession.filter(r=>local.has(r.sessionId));
+  if(!matched.length)return`${SPEND.bySession.length} billed sessions on the account, none matching the sessions on this machine`;
+  const billed=matched.reduce((a,r)=>a+r.cost,0);
+  return `${matched.length} of ${fmt(DATA.sessions.length)} local sessions matched · ${fmtCost(billed)} billed to them`;
+}
 
 function keyControls(){
   if(!ORKEY||!ORKEY.configured)return'';
@@ -661,9 +680,16 @@ function weekdayList(){const w=DATA.weekdayUsage||[];if(!w.length)return'<div cl
 function openSession(id,rank=null){const session=DATA.sessions.find(s=>s.sessionId===id);if(!session)return;selectedSessionId=id;selectedPromptRank=(rank&&session.promptBreakdown.some(p=>p.rank===rank))?rank:(session.promptBreakdown[0]?.rank||1);document.getElementById('drawer').classList.add('open');document.getElementById('scrim').classList.add('open');document.getElementById('drawer').setAttribute('aria-hidden','false');document.body.style.overflow='hidden';renderDrawer();if(document.getElementById('sessionsBody'))renderRows()}
 function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('scrim').classList.remove('open');document.getElementById('drawer').setAttribute('aria-hidden','true');document.body.style.overflow=''}
 function selectPrompt(rank){selectedPromptRank=rank;renderDrawer()}
+function billedBadge(session){
+  const billed=billedForSession(session.sessionId);
+  if(!billed)return'';
+  const est=session.cost||0;
+  const delta=est>0?Math.round((billed.cost-est)/billed.cost*100):null;
+  return`<span class="badge billed" title="Charged by OpenRouter for this session${delta!==null?` · local estimate is ${delta>0?'under':'over'} by ${Math.abs(delta)}%`:''}">${fmtCost(billed.cost)} billed</span>`;
+}
 function renderDrawer(){const session=DATA.sessions.find(s=>s.sessionId===selectedSessionId);if(!session)return;const p=session.promptBreakdown.find(x=>x.rank===selectedPromptRank)||session.promptBreakdown[0];const ctxPct=session.contextWindow&&session.peakInputTokens?Math.round(session.peakInputTokens/session.contextWindow*100):null;
 document.getElementById('drawerContent').innerHTML=`
-<div class="drawer-head"><div><div class="drawer-title">${esc(session.title)}</div><div class="drawer-meta"><span>${esc(session.project)}</span>·<span class="badge">${esc(session.model)}</span>·<span>${fmt(session.totalTokens)} tokens</span>·<span>${fmt(session.promptCount)} prompts</span>${ctxPct!=null?`·<span>peak ctx ${ctxPct}%</span>`:''}</div></div><button class="iconbtn" onclick="closeDrawer()" title="Close">×</button></div>
+<div class="drawer-head"><div><div class="drawer-title">${esc(session.title)}</div><div class="drawer-meta"><span>${esc(session.project)}</span>·<span class="badge">${esc(session.model)}</span>·<span>${fmt(session.totalTokens)} tokens</span>·<span>${fmt(session.promptCount)} prompts</span>${ctxPct!=null?`·<span>peak ctx ${ctxPct}%</span>`:''}${billedBadge(session)?'·'+billedBadge(session):''}</div></div><button class="iconbtn" onclick="closeDrawer()" title="Close">×</button></div>
 <div class="drawer-body">
   <div><div class="muted" style="margin-bottom:8px;font-weight:700">Prompts in session (${session.promptBreakdown.length})</div><div class="prompt-rail">${session.promptBreakdown.map(pp=>`<div class="prail-item ${pp.rank===selectedPromptRank?'active':''}" onclick="selectPrompt(${pp.rank})"><div class="pt">${esc(pp.prompt)}</div><div class="muted" style="margin-top:5px;font-size:11px">${fmt(pp.totalTokens)} · ${fmt(pp.turnCount)} turns</div><div class="token-strip">${strip(pp)}</div></div>`).join('')}</div></div>
   ${p?promptDetail(p):''}

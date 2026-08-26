@@ -96,24 +96,94 @@ test('an inference key yields rolling totals and says why there is no breakdown'
   assert.ok(!calls.some((c) => c.url.includes('/activity')), 'does not call an endpoint the key cannot use');
 });
 
-test('a management key adds the per-model breakdown and credit balance', async (t) => {
+test('a management key uses analytics, not its own zero usage counters', async (t) => {
   const realFetch = global.fetch;
   t.after(() => { global.fetch = realFetch; delete process.env.OPENROUTER_API_KEY; });
   process.env.OPENROUTER_API_KEY = 'sk-or-mgmt';
-  stubFetch({
-    '/key': json({ ...KEY_INFO, is_management_key: true }),
-    '/activity': json([{ date: new Date().toISOString().slice(0, 10), model: 'anthropic/claude-opus-4.5', requests: 3, prompt_tokens: 10, completion_tokens: 5, usage: 0.5 }]),
-    '/credits': json({ total_credits: 100.5, total_usage: 25.75 }),
-  });
+  const queries = [];
+  global.fetch = async (url, init) => {
+    const u = String(url);
+    // A management key never makes inference calls, so every usage counter on it
+    // reads 0 - the bug this test pins down.
+    if (u.endsWith('/key')) return { ok: true, status: 200, json: async () => ({ data: { label: 'sk-or-v1-954...280', is_management_key: true, usage: 0, usage_daily: 0, usage_weekly: 0, usage_monthly: 0 } }) };
+    if (u.includes('/analytics/query')) {
+      const body = JSON.parse(init.body);
+      queries.push(body);
+      const rows = body.dimensions[0] === 'model'
+        ? [
+          { date__day: '2026-08-26', model: 'openai/gpt-5.6-sol-20260709', total_usage: 0.388883, request_count: '9', tokens_prompt: '340000', tokens_completion: '12319', reasoning_tokens: '6396', cached_tokens: '164221' },
+          { date__day: '2026-08-26', model: 'deepseek/deepseek-v4-flash-20260731', total_usage: 0.252879, request_count: '264', tokens_prompt: '14700000', tokens_completion: '12454', reasoning_tokens: '0', cached_tokens: '900000' },
+        ]
+        : [
+          { created_at__day: '2026-08-26', session_id: 'ses_fc021dc76ffenMg6hPE67Ew5f5', total_usage: 0.388883, request_count: '9', tokens_prompt: '340000', tokens_completion: '12319' },
+          { created_at__day: '2026-08-26', session_id: 'none', total_usage: 0.000654, request_count: '1', tokens_prompt: '253', tokens_completion: '0' },
+        ];
+      return { ok: true, status: 200, json: async () => ({ data: { data: rows, metadata: { row_count: rows.length } } }) };
+    }
+    if (u.includes('/credits')) return { ok: true, status: 200, json: async () => ({ data: { total_credits: 10, total_usage: 0.60974454 } }) };
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
 
   const out = await openrouter.fetchSpend('day');
-  assert.equal(out.isManagement, true);
-  assert.equal(out.byModel[0].model, 'anthropic/claude-opus-4.5');
-  assert.equal(out.requests, 3);
-  assert.equal(Number(out.credits.remaining.toFixed(2)), 74.75);
-  // The key's rolling total wins: /activity only covers completed UTC days.
-  assert.equal(out.cost, 2);
-  assert.equal(out.costSource, 'key-rolling-total');
+  assert.equal(out.costSource, 'analytics', 'must not fall back to the key counters');
+  assert.equal(Number(out.cost.toFixed(6)), 0.641762, 'sum of the analytics rows, not $0');
+  assert.equal(out.requests, 273, 'string counters are coerced');
+  assert.equal(out.byModel[0].model, 'openai/gpt-5.6-sol-20260709');
+  assert.equal(out.localWindow, true, 'analytics windows follow the local calendar');
+  assert.equal(Number(out.credits.remaining.toFixed(4)), 9.3903);
+
+  // OpenCode's session ids arrive as an analytics dimension, so real cost can be
+  // attributed per session; rows with no session are dropped.
+  assert.equal(out.bySession.length, 1);
+  assert.equal(out.bySession[0].sessionId, 'ses_fc021dc76ffenMg6hPE67Ew5f5');
+  assert.equal(out.bySession[0].tokens, 352319);
+
+  assert.deepEqual(queries.map((q) => q.dimensions[0]), ['model', 'session_id']);
+  assert.equal(queries[0].granularity, 'day');
+  assert.ok(new Date(queries[0].time_range.start) <= new Date(queries[0].time_range.end));
+  assert.ok(!out.caveats.some((c) => c.includes('midnight UTC')), 'the UTC caveat does not apply to analytics windows');
+});
+
+test('an analytics outage falls back to the completed-day activity feed', async (t) => {
+  const realFetch = global.fetch;
+  t.after(() => { global.fetch = realFetch; delete process.env.OPENROUTER_API_KEY; });
+  process.env.OPENROUTER_API_KEY = 'sk-or-mgmt';
+  global.fetch = async (url) => {
+    const u = String(url);
+    if (u.endsWith('/key')) return { ok: true, status: 200, json: async () => ({ data: { is_management_key: true, usage: 0, usage_daily: 0 } }) };
+    if (u.includes('/analytics/query')) return { ok: false, status: 500, json: async () => ({}) };
+    if (u.includes('/activity')) return { ok: true, status: 200, json: async () => ({ data: [{ date: new Date().toISOString().slice(0, 10), model: 'a/one', requests: 4, prompt_tokens: 10, completion_tokens: 2, usage: 0.5 }] }) };
+    if (u.includes('/credits')) return { ok: true, status: 200, json: async () => ({ data: { total_credits: 10, total_usage: 0.5 } }) };
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  const out = await openrouter.fetchSpend('day');
+  assert.equal(out.costSource, 'activity');
+  assert.equal(out.cost, 0.5);
+  assert.ok(out.warnings.some((w) => w.includes('Analytics unavailable')));
+});
+
+test('the local window follows the viewer calendar and day columns parse as UTC', () => {
+  const { localWindow, rowDate, foldRows } = openrouter._test;
+  const now = new Date('2026-08-26T23:30:00Z');
+  const today = localWindow('day', now);
+  assert.equal(new Date(today.start).getHours(), 0, 'starts at local midnight');
+  assert.equal(new Date(today.end).getTime(), now.getTime());
+  const week = localWindow('week', now);
+  assert.equal(Math.round((new Date(today.start) - new Date(week.start)) / 86400000), 6);
+
+  assert.equal(rowDate({ date__day: '2026-08-26' }), '2026-08-26');
+  // No zone marker in the payload, but the values are UTC.
+  assert.equal(rowDate({ date__hour: '2026-08-26 21:00:00' }).toISOString(), '2026-08-26T21:00:00.000Z');
+  assert.equal(rowDate({}), null);
+
+  const folded = foldRows([
+    { model: 'a', total_usage: 1, request_count: '2', tokens_prompt: '10', tokens_completion: '5' },
+    { model: 'a', total_usage: 2, request_count: '3', tokens_prompt: '20', tokens_completion: '1' },
+    { model: 'b', total_usage: 5, request_count: '1', tokens_prompt: '1', tokens_completion: '1' },
+  ], 'model');
+  assert.deepEqual(folded.map((f) => f.key), ['b', 'a'], 'ranked by spend');
+  assert.equal(folded[1].requests, 5);
+  assert.equal(folded[1].tokens, 36);
 });
 
 test('a rejected key degrades to a warning instead of throwing', async (t) => {

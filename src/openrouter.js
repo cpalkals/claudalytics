@@ -138,6 +138,77 @@ async function callApi(endpoint, key) {
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+const ANALYTICS_METRICS = ['total_usage', 'request_count', 'tokens_prompt', 'tokens_completion', 'reasoning_tokens', 'cached_tokens'];
+
+async function analyticsQuery(key, { dimensions, start, end }) {
+  let res;
+  try {
+    res = await fetch(`${BASE}/analytics/query`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        metrics: ANALYTICS_METRICS,
+        dimensions,
+        granularity: 'day',
+        time_range: { start, end },
+        limit: 5000,
+      }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    const reason = err.name === 'TimeoutError' ? `timed out after ${TIMEOUT_MS / 1000}s` : err.message;
+    return { ok: false, error: `Could not reach OpenRouter (${reason}).` };
+  }
+  if (!res.ok) return { ok: false, error: res.status === 403 ? 'a management key is required' : `HTTP ${res.status}` };
+  try {
+    const body = await res.json();
+    return { ok: true, rows: (body.data && body.data.data) || [] };
+  } catch (err) {
+    return { ok: false, error: `unreadable JSON (${err.message})` };
+  }
+}
+
+// Analytics accepts real timestamps, so the window can follow the viewer's own
+// calendar instead of OpenRouter's UTC one. `all` reaches back far enough to
+// cover any retained history.
+function localWindow(range, now = new Date()) {
+  const end = new Date(now);
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  if (range === 'week') start.setDate(start.getDate() - 6);
+  else if (range === 'month') start.setDate(start.getDate() - 29);
+  else if (range !== 'day') start.setFullYear(start.getFullYear() - 2);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+// Rows come back as "YYYY-MM-DD HH:mm:ss" with no zone marker; they are UTC, and
+// Date() would read them as local time. Normalise before doing anything with them.
+function rowDate(row) {
+  const raw = row.date__day || row.created_at__day || row.date__hour || row.created_at__hour || '';
+  const text = String(raw).trim();
+  if (!text) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const iso = text.includes('T') ? text : text.replace(' ', 'T');
+  return new Date(iso.endsWith('Z') ? iso : `${iso}Z`);
+}
+
+function foldRows(rows, dimension) {
+  const out = new Map();
+  for (const row of rows) {
+    const keyValue = row[dimension] || 'unknown';
+    const acc = out.get(keyValue) || { key: keyValue, cost: 0, requests: 0, tokens: 0, promptTokens: 0, completionTokens: 0, reasoningTokens: 0, cachedTokens: 0 };
+    acc.cost += num(row.total_usage);
+    acc.requests += num(row.request_count);
+    acc.promptTokens += num(row.tokens_prompt);
+    acc.completionTokens += num(row.tokens_completion);
+    acc.reasoningTokens += num(row.reasoning_tokens);
+    acc.cachedTokens += num(row.cached_tokens);
+    acc.tokens = acc.promptTokens + acc.completionTokens;
+    out.set(keyValue, acc);
+  }
+  return [...out.values()].sort((a, b) => b.cost - a.cost);
+}
+
 // Last 30 completed UTC days, one row per day per model. Management key only.
 function normalizeActivity(rows) {
   return (Array.isArray(rows) ? rows : []).map((row) => ({
@@ -223,13 +294,28 @@ async function fetchSpend(range = 'all') {
   const info = keyRes.data || {};
   const isManagement = Boolean(info.is_management_key || info.is_provisioning_key);
 
+  // A management key's own usage counters read 0 — they track that key's
+  // inference spend, and management keys never make inference calls. Its account
+  // figures have to come from analytics instead.
+  let analytics = null;
+  let bySession = [];
   let activity = [];
   if (isManagement) {
-    const activityRes = await callApi('/activity', key);
-    if (activityRes.ok) activity = normalizeActivity(activityRes.data);
-    else warnings.push(`Per-model breakdown unavailable: ${activityRes.error}.`);
+    const window = localWindow(range);
+    const perModel = await analyticsQuery(key, { dimensions: ['model'], ...window });
+    if (perModel.ok) {
+      analytics = { rows: perModel.rows, byModel: foldRows(perModel.rows, 'model') };
+      const perSession = await analyticsQuery(key, { dimensions: ['session_id'], ...window });
+      // OpenCode sends its own session id upstream, so these join straight onto
+      // local sessions and give a real billed figure per session.
+      if (perSession.ok) bySession = foldRows(perSession.rows, 'session_id').filter((r) => r.key && r.key !== 'none');
+    } else {
+      warnings.push(`Analytics unavailable (${perModel.error}); falling back to the completed-day activity feed.`);
+      const activityRes = await callApi('/activity', key);
+      if (activityRes.ok) activity = normalizeActivity(activityRes.data);
+    }
   } else {
-    warnings.push('This is an inference key, so only rolling totals are available. A management key adds a 30-day per-model breakdown.');
+    warnings.push('This is an inference key, so only rolling totals are available. A management key adds per-model and per-session detail on your own calendar.');
   }
 
   let credits = null;
@@ -242,10 +328,21 @@ async function fetchSpend(range = 'all') {
   }
 
   const detail = activity.length ? summarizeActivity(activity, range) : null;
-  // Prefer the key's own rolling total: it is authoritative for the current
-  // partial day, which /activity (completed days only) does not yet include.
-  const rolling = spendFromKey(info, range);
-  const cost = rolling !== null ? rolling : (detail ? detail.cost : 0);
+  const rolling = isManagement ? null : spendFromKey(info, range);
+  // Analytics is the best figure when available: account-wide, near real time,
+  // and windowed to the viewer's own days rather than UTC ones. An inference key
+  // falls back to its rolling counters, then to the completed-day feed.
+  const analyticsCost = analytics ? analytics.rows.reduce((a, r) => a + num(r.total_usage), 0) : null;
+  const cost = analyticsCost !== null ? analyticsCost
+    : rolling !== null ? rolling
+    : (detail ? detail.cost : 0);
+  const costSource = analyticsCost !== null ? 'analytics'
+    : rolling !== null ? 'key-rolling-total'
+    : 'activity';
+  const byModel = analytics ? analytics.byModel.map((m) => ({ model: m.key, cost: m.cost, requests: m.requests, tokens: m.tokens }))
+    : (detail ? detail.byModel : []);
+  const requests = analytics ? analytics.byModel.reduce((a, m) => a + m.requests, 0)
+    : (detail ? detail.requests : null);
 
   return {
     enabled: true,
@@ -258,10 +355,13 @@ async function fetchSpend(range = 'all') {
     keyLabel: info.label || null,
     isManagement,
     cost,
-    costSource: rolling !== null ? 'key-rolling-total' : 'activity',
-    requests: detail ? detail.requests : null,
-    byModel: detail ? detail.byModel : [],
+    costSource,
+    // Analytics windows follow the local calendar; the rolling counters do not.
+    localWindow: costSource === 'analytics',
+    requests,
+    byModel,
     byDay: detail ? detail.byDay : [],
+    bySession: bySession.map((r) => ({ sessionId: r.key, cost: r.cost, requests: r.requests, tokens: r.tokens })),
     credits,
     limit: info.limit == null ? null : { cap: num(info.limit), remaining: num(info.limit_remaining), reset: info.limit_reset || null },
     totals: {
@@ -270,12 +370,14 @@ async function fetchSpend(range = 'all') {
       month: spendFromKey(info, 'month'),
       all: spendFromKey(info, 'all'),
     },
-    caveats: [
-      'Covers every request made with this API key, including any traffic that did not come from this agent.',
-      'OpenRouter totals roll over at midnight UTC; this dashboard groups by your local day.',
-    ],
+    caveats: (costSource === 'analytics'
+      ? ['Covers every request on this OpenRouter account, including any traffic that did not come from this agent.']
+      : [
+        'Covers every request made with this API key, including any traffic that did not come from this agent.',
+        'OpenRouter totals roll over at midnight UTC; this dashboard groups by your local day.',
+      ]),
     warnings,
   };
 }
 
-module.exports = { enabled, fetchSpend, status, setKey, clearKey, _test: { normalizeActivity, summarizeActivity, spendFromKey, utcDaysForRange, mask, configPath, resetSession: () => { sessionKey = null; } } };
+module.exports = { enabled, fetchSpend, status, setKey, clearKey, _test: { normalizeActivity, summarizeActivity, spendFromKey, utcDaysForRange, mask, configPath, localWindow, rowDate, foldRows, resetSession: () => { sessionKey = null; } } };
