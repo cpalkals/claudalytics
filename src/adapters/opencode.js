@@ -119,6 +119,10 @@ function usageFromParts(parts, d) {
   }
   // tokens.input excludes cache reads/writes and tokens.output excludes reasoning
   // (see Session.getUsage in opencode), so both flavors add rather than overlap.
+  // Note: OpenCode's OpenAI-chat protocol - which OpenRouter and every other
+  // OpenAI-compatible provider use - never reports cache-write tokens. Those are
+  // already inside the provider's prompt_tokens, so they show up under fresh
+  // input instead: the input total stays right, only the split is lost.
   const input = acc.fresh + acc.cacheRead + acc.cacheWrite;
   const output = acc.output + acc.reasoning;
   return {
@@ -163,7 +167,7 @@ async function parse(options = {}) {
   const source = {
     id, label, mark, accent, home: file,
     costBasis: 'OpenCode’s own models.dev cost, with published list rates filling the gaps',
-    costDisclaimer: 'Per-step cost as OpenCode recorded it; turns it recorded as $0 (custom/local/proxied providers) are back-filled from published list rates. An API-rate ballpark, not a subscription bill — Copilot turns carry an AIU-derived amount instead.',
+    costDisclaimer: 'Per-step cost as OpenCode recorded it; turns it recorded as $0 (custom/local/proxied providers) are back-filled from published list rates. An API-rate ballpark, not a subscription bill — Copilot turns carry an AIU-derived amount instead. OpenAI-compatible providers (OpenRouter among them) do not report cache-write tokens, so those land in fresh input and cost runs a little low; a reseller’s own margin is not included either.',
   };
   if (!fs.existsSync(file)) return emptyResult(source, capabilities, [{ type: 'missing-dir', message: `OpenCode database not found at ${file}` }]);
   const DatabaseSync = loadSqlite();
