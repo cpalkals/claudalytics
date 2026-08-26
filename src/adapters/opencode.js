@@ -142,6 +142,22 @@ function toolNameFromPart(d) {
   return null;
 }
 
+// OpenCode's Task tool runs each helper agent in its own session row, linked to
+// the session that spawned it by parent_id. Those are not separate things the
+// user started, so we fold a helper's turns into its top-level ancestor instead
+// of listing it on its own. Orphans (parent row gone) stay top-level.
+function rootSessionId(id, parentById) {
+  const seen = new Set([id]);
+  let current = id;
+  for (let depth = 0; depth < 32; depth += 1) {
+    const parent = parentById.get(current);
+    if (!parent || !parentById.has(parent) || seen.has(parent)) return current;
+    seen.add(parent);
+    current = parent;
+  }
+  return current;
+}
+
 async function parse(options = {}) {
   const file = dbPath(options);
   const source = {
@@ -168,6 +184,10 @@ async function parse(options = {}) {
     for (const m of messageRows) (msgBySession[m.session_id] = msgBySession[m.session_id] || []).push(m);
     const partsByMessage = {};
     for (const p of partRows) (partsByMessage[p.message_id] = partsByMessage[p.message_id] || []).push(safeParse(p.data));
+
+    // parent_id is absent on pre-2026 databases; treat those rows as top-level.
+    const parentById = new Map(sessionRows.map((row) => [row.id, row.parent_id || null]));
+    const collected = new Map();
 
     for (const s of sessionRows) {
       const messages = msgBySession[s.id] || [];
@@ -214,15 +234,50 @@ async function parse(options = {}) {
       }
 
       if (!turns.length && Object.keys(toolCounts).length === 0) continue;
+      collected.set(s.id, { row: s, turns, toolCounts, toolEvents });
+    }
+
+    // Fold each helper session into its top-level ancestor.
+    for (const [sessionId, data] of [...collected]) {
+      const rootId = rootSessionId(sessionId, parentById);
+      if (rootId === sessionId) continue;
+      const root = collected.get(rootId);
+      if (!root) continue; // ancestor had no turns of its own — leave the helper standalone
+      for (const turn of data.turns) {
+        turn.subagentSessionId = sessionId;
+        turn.prompt = `↳ subagent: ${turn.prompt || data.row.title || sessionId}`;
+      }
+      for (const event of data.toolEvents) {
+        event.prompt = `↳ subagent: ${event.prompt || data.row.title || sessionId}`;
+      }
+      root.turns.push(...data.turns);
+      root.toolEvents.push(...data.toolEvents);
+      for (const [name, count] of Object.entries(data.toolCounts)) {
+        root.toolCounts[name] = (root.toolCounts[name] || 0) + count;
+      }
+      root.subagentCount = (root.subagentCount || 0) + 1;
+      root.subagentTokens = (root.subagentTokens || 0) + data.turns.reduce((a, t) => a + t.totalTokens, 0);
+      collected.delete(sessionId);
+    }
+
+    for (const { row: s, turns, toolCounts, toolEvents, subagentCount, subagentTokens } of collected.values()) {
+      // A helper's turns run after the parent's opening turn, so keep the merged
+      // list in wall-clock order for the per-turn drill-down.
+      turns.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+      const lastTurnTs = turns.length ? turns[turns.length - 1].timestamp : null;
 
       const firstTs = new Date(s.time_created).toISOString();
-      const lastTs = new Date(s.time_updated || s.time_created).toISOString();
+      // A helper can finish after the parent row's own time_updated.
+      const rowLastTs = new Date(s.time_updated || s.time_created).toISOString();
+      const lastTs = lastTurnTs && lastTurnTs > rowLastTs ? lastTurnTs : rowLastTs;
       const date = localDay(firstTs);
       const sessionModel = safeParse(s.model).id || safeParse(s.model).modelID;
       const modelCounts = {};
       for (const t of turns) if (t.model && t.model !== 'unknown') modelCounts[t.model] = (modelCounts[t.model] || 0) + 1;
       const primaryModel = Object.entries(modelCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || sessionModel || 'unknown';
-      const title = turns.find((t) => t.prompt)?.prompt || (s.title && !s.title.startsWith('New session') ? s.title : null) || s.title || '(untitled OpenCode session)';
+      // Title from a prompt the user actually typed, never a subagent instruction.
+      const title = turns.find((t) => t.prompt && !t.subagentSessionId)?.prompt
+        || (s.title && !s.title.startsWith('New session') ? s.title : null) || s.title || '(untitled OpenCode session)';
       const promptBreakdown = buildPromptBreakdown(turns, toolEvents, title);
 
       sessions.push({
@@ -231,6 +286,7 @@ async function parse(options = {}) {
         project: projectFromCwd(s.directory || s.path), cwd: s.directory || null, date,
         timestamp: firstTs, updatedTimestamp: lastTs, model: primaryModel,
         turnCount: turns.length, agentMessages: turns.length,
+        subagentSessions: subagentCount || 0, subagentTokens: subagentTokens || 0,
         toolCount: Object.values(toolCounts).reduce((a, n) => a + n, 0), toolCounts,
         promptCount: promptBreakdown.length, promptBreakdown, turns,
         inputTokens: turns.reduce((a, t) => a + t.inputTokens, 0),
