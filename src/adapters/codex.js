@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { expandHome, parseJSONLFile, readJSONLMap, walkJSONL, textFromContent, projectFromCwd, clip, localDay } = require('./shared');
-const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
+const { buildResult, emptyResult, buildPromptBreakdown, splitPricedTokens, unpricedModelWarning } = require('./aggregate');
 
 const id = 'codex';
 const label = 'Codex';
@@ -143,7 +143,48 @@ function sumTurns(turns, key) {
   return turns.reduce((t, x) => t + (x[key] || 0), 0);
 }
 
+// A forked session or a spawned subagent opens its rollout file with the
+// parent's full history copied in, every line re-stamped to the fork instant.
+// Left alone, that means the parent's tokens/tools/prompts get counted again
+// in the child's own file.
+function isForkedSessionMeta(payload) {
+  if (typeof payload.forked_from_id === 'string') return true;
+  const spawn = payload.source?.subagent?.thread_spawn;
+  return typeof spawn?.parent_thread_id === 'string';
+}
+// The copied history is written in one synchronous burst (observed gaps under
+// ~40ms); the fork's own first genuine turn only lands after a real model turn
+// (observed 5s+). A 1s gap cleanly separates the two.
+const FORK_COPY_MAX_GAP_MS = 1000;
+
+// Drops replayed ancestor session_meta entries — only the first one describes
+// this file's own session — and, for a fork or subagent specifically, the
+// synchronous burst of copied history that follows it. Already counted once
+// in the ancestor's own file, so this runs once up front rather than
+// threading fork-detection state through the main per-entry loop below.
+function stripForkedHistory(entries) {
+  const metaIndex = entries.findIndex((e) => e.type === 'session_meta');
+  if (metaIndex === -1) return entries;
+  const meta = entries[metaIndex];
+  const head = entries.slice(0, metaIndex + 1);
+
+  const anchorMs = meta.timestamp ? Date.parse(meta.timestamp) : NaN;
+  let inBurst = !Number.isNaN(anchorMs) && isForkedSessionMeta(meta.payload || {});
+  let cursor = anchorMs;
+
+  const tail = entries.slice(metaIndex + 1).filter((entry) => {
+    if (entry.type === 'session_meta') return false;
+    if (!inBurst) return true;
+    const t = entry.timestamp ? Date.parse(entry.timestamp) : NaN;
+    if (Number.isNaN(t) || t - cursor >= FORK_COPY_MAX_GAP_MS) { inBurst = false; return true; }
+    cursor = t;
+    return false;
+  });
+  return [...head, ...tail];
+}
+
 function extractSession(entries, filePath, titleMap, promptMap) {
+  entries = stripForkedHistory(entries);
   let meta = {};
   let model = 'unknown';
   let currentUserPrompt = null;
@@ -228,8 +269,7 @@ function extractSession(entries, filePath, titleMap, promptMap) {
     reasoningOutputTokens: sumTurns(turns, 'reasoningOutputTokens'),
     totalTokens: sumTurns(turns, 'totalTokens'),
     cost: sumTurns(turns, 'cost'),
-    pricedTokens: turns.filter((turn) => turn.costEstimated).reduce((sum, turn) => sum + turn.totalTokens, 0),
-    unpricedTokens: turns.filter((turn) => !turn.costEstimated).reduce((sum, turn) => sum + turn.totalTokens, 0),
+    ...splitPricedTokens(turns),
     contextWindow: lastTurn.contextWindow || null, peakInputTokens, peakTurnTokens, rateLimit: latestRate,
   };
 }
@@ -258,15 +298,8 @@ async function parse(options = {}) {
     const session = extractSession(entries, filePath, titleMap, promptMap);
     if (session) sessions.push(session);
   }
-  const unpricedModels = [...new Set(sessions.flatMap((session) => session.turns)
-    .filter((turn) => !turn.costEstimated)
-    .map((turn) => turn.model || 'unknown'))].sort();
-  if (unpricedModels.length) {
-    warnings.push({
-      type: 'unpriced-model',
-      message: `No official API rate is configured for: ${unpricedModels.join(', ')}. Their tokens are excluded from estimated cost.`,
-    });
-  }
+  const unpriced = unpricedModelWarning(sessions);
+  if (unpriced) warnings.push(unpriced);
   return buildResult(sessions, source, capabilities, warnings);
 }
 
@@ -321,5 +354,5 @@ async function content(session, options = {}) {
 
 module.exports = {
   id, label, mark, accent, capabilities, home, detect, parse, content,
-  _test: { MODEL_PRICING, LONG_CONTEXT_THRESHOLD, getPricing, estimateCost, tokenUsageFromPayload, extractSession },
+  _test: { MODEL_PRICING, LONG_CONTEXT_THRESHOLD, getPricing, estimateCost, tokenUsageFromPayload, extractSession, isForkedSessionMeta, stripForkedHistory },
 };

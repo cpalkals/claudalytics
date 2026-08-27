@@ -661,7 +661,7 @@ function turnDetail(t,i){const C=caps();const total=Math.max(t.totalTokens||((t.
       ${C.reasoning&&reason?row('var(--mauve)','· Reasoning',reason):''}
       <div class="bd-row total"><span class="bd-k">Total</span><span class="bd-v">${fmt(total)}</span><span class="bd-p"></span></div>
     </div>
-    ${C.cost&&t.costEstimated!==false&&t.cost?`<div class="bd-meta">Est. standard API cost ≈ $${Number(t.cost).toFixed(4)}${t.longContextPricing?' · long-context rate':''}</div>`:''}
+    ${C.cost&&t.costEstimated!==false&&t.cost?`<div class="bd-meta">${t.costReported?'API cost (reported by the agent)':'Est. standard API cost'} ≈ $${Number(t.cost).toFixed(4)}${t.longContextPricing?' · long-context rate':''}</div>`:''}
     ${C.cost&&t.costEstimated===false?`<div class="bd-meta">API cost not estimated · no configured official rate for this model</div>`:''}
     ${t.contextWindow?`<div class="bd-meta">Context window: ${fmt(t.contextWindow)} tokens</div>`:''}
     ${t.tools&&t.tools.length?`<div class="bd-tools">Tools this turn: ${t.tools.map(esc).join(', ')}</div>`:''}

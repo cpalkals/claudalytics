@@ -30,3 +30,11 @@ test('cache rates stay at the 1.25x write / 0.1x read multipliers', () => {
     assert.equal(Number((p.cacheRead / p.input).toFixed(4)), 0.1, model);
   }
 });
+
+test('does not invent a price for a bare, version-ambiguous family alias', () => {
+  for (const model of ['opus', 'sonnet', 'haiku', 'fable', 'Opus', 'SONNET']) {
+    assert.equal(getPricing(model), null, model);
+  }
+  assert.equal(getPricing('some-future-model-id'), null);
+  assert.equal(getPricing(''), null);
+});

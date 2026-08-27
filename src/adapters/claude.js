@@ -4,7 +4,7 @@ const path = require('path');
 const os = require('os');
 const { expandHome, parseJSONLFile, clip, localDay } = require('./shared');
 const { getPromptTemplate } = require('./claude-prompt');
-const { buildResult, emptyResult, buildPromptBreakdown } = require('./aggregate');
+const { buildResult, emptyResult, buildPromptBreakdown, splitPricedTokens, unpricedModelWarning } = require('./aggregate');
 
 const id = 'claude';
 const label = 'Claude Code';
@@ -48,7 +48,6 @@ const MODEL_PRICING = {
   'haiku-4.5': { input: 1 / 1e6, output: 5 / 1e6, cacheWrite: 1.25 / 1e6, cacheRead: 0.10 / 1e6 },
   'haiku-3.5': { input: 0.80 / 1e6, output: 4 / 1e6, cacheWrite: 1.00 / 1e6, cacheRead: 0.08 / 1e6 },
 };
-const DEFAULT_PRICING = MODEL_PRICING.sonnet;
 // Model ids arrive dashed (claude-opus-4-6) or dotted (opus-4.6), so every
 // version test below accepts either spelling.
 const PRICING_RULES = [
@@ -61,11 +60,16 @@ const PRICING_RULES = [
   [/3[-.]5-haiku|haiku-3[-.]5/, MODEL_PRICING['haiku-3.5']],
   [/haiku/, MODEL_PRICING['haiku-4.5']],
 ];
+// A bare family alias ("sonnet", "opus") means the log never recorded which
+// generation actually served the request — that cannot be recovered after the
+// fact, so price it as unpriced rather than silently guessing a generation.
+const UNPRICEABLE_MODELS = new Set(['opus', 'sonnet', 'haiku', 'fable']);
 function getPricing(model) {
-  if (!model) return DEFAULT_PRICING;
+  if (!model) return null;
   const m = model.toLowerCase();
+  if (UNPRICEABLE_MODELS.has(m)) return null;
   for (const [rx, pricing] of PRICING_RULES) if (rx.test(m)) return pricing;
-  return DEFAULT_PRICING;
+  return null;
 }
 
 function home(options = {}) {
@@ -115,7 +119,9 @@ function extractTurns(entries) {
       // Treat all input flavors (fresh + cache write + cache read) as input volume,
       // and cacheRead as the "cached" slice, to match the dashboard's token model.
       const totalInput = inputTokens + cacheCreate + cacheRead;
-      const cost = inputTokens * pricing.input + cacheCreate * pricing.cacheWrite + cacheRead * pricing.cacheRead + outputTokens * pricing.output;
+      const cost = pricing
+        ? inputTokens * pricing.input + cacheCreate * pricing.cacheWrite + cacheRead * pricing.cacheRead + outputTokens * pricing.output
+        : 0;
       byId.set(msgId, turns.length);
       turns.push({
         turnId: msgId,
@@ -129,12 +135,56 @@ function extractTurns(entries) {
         totalTokens: totalInput + outputTokens,
         contextWindow: null,
         cost,
+        costEstimated: Boolean(pricing),
+        costReported: false,
         tools,
         hasText,
       });
     }
   }
   return turns;
+}
+
+// Claude Code periodically writes a `cost-state` entry: a running cumulative
+// total of what it has actually billed this session, broken down per model.
+// Each one is a fresh snapshot (not a delta), so only the last one in the file
+// reflects the session's final total.
+function latestCostState(entries) {
+  let latest = null;
+  for (const entry of entries) {
+    if (entry.type === 'cost-state' && entry.modelUsage && typeof entry.modelUsage === 'object') latest = entry;
+  }
+  return latest;
+}
+
+// Rescales a model's turns so their summed cost matches what Claude Code
+// itself reports for that model this session. The snapshot only gives one
+// total per model, not a per-turn figure, so the *relative* cost across turns
+// stays proportional to our own input/output/cache estimate — only the total
+// is corrected to the real, billed figure.
+function reconcileWithCostState(turns, costState) {
+  if (!costState) return;
+  const byModel = new Map();
+  for (const turn of turns) {
+    if (!byModel.has(turn.model)) byModel.set(turn.model, []);
+    byModel.get(turn.model).push(turn);
+  }
+  for (const [model, group] of byModel) {
+    const usage = costState.modelUsage[model];
+    const reportedCost = usage && typeof usage.costUSD === 'number' && Number.isFinite(usage.costUSD) ? usage.costUSD : null;
+    if (reportedCost === null) continue;
+    const estimatedTotal = group.reduce((sum, turn) => sum + (turn.cost || 0), 0);
+    if (estimatedTotal > 0) {
+      const scale = reportedCost / estimatedTotal;
+      for (const turn of group) { turn.cost *= scale; turn.costEstimated = true; turn.costReported = true; }
+      continue;
+    }
+    // Nothing to scale from (e.g. our table treats this model as unpriced) —
+    // fall back to splitting the reported total by each turn's token share.
+    const tokenTotal = group.reduce((sum, turn) => sum + (turn.totalTokens || 0), 0);
+    if (tokenTotal <= 0) continue;
+    for (const turn of group) { turn.cost = reportedCost * (turn.totalTokens / tokenTotal); turn.costEstimated = true; turn.costReported = true; }
+  }
 }
 
 function modelLabel(model) {
@@ -148,7 +198,11 @@ function modelLabel(model) {
 
 async function parse(options = {}) {
   const h = home(options);
-  const source = { id, label, mark, accent, home: h };
+  const source = {
+    id, label, mark, accent, home: h,
+    costBasis: "Claude Code's own reported per-session cost when available, else standard Anthropic API rates",
+    costDisclaimer: "Reconciled against Claude Code's own cost tracking for this session when present; otherwise a standard API-rate estimate. Not your subscription bill.",
+  };
   const projectsDir = path.join(h, 'projects');
   if (!fs.existsSync(projectsDir)) return emptyResult(source, capabilities, [{ type: 'missing-dir', message: `Claude Code data not found at ${projectsDir}` }]);
 
@@ -183,6 +237,7 @@ async function parse(options = {}) {
       for (const e of entries) { const hit = limitHitFromEntry(e); if (hit) limitHits.push(hit); }
       const rawTurns = extractTurns(entries);
       if (!rawTurns.length) continue;
+      reconcileWithCostState(rawTurns, latestCostState(entries));
 
       // Normalize project label from the encoded dir name (cwd path with '-' separators).
       const cwd = entries.find((e) => e.cwd)?.cwd || projectDir.replace(/^-/, '/').replace(/-/g, '/');
@@ -218,11 +273,15 @@ async function parse(options = {}) {
         reasoningOutputTokens: 0,
         totalTokens: rawTurns.reduce((s, t) => s + t.totalTokens, 0),
         cost: rawTurns.reduce((s, t) => s + (t.cost || 0), 0),
+        ...splitPricedTokens(rawTurns),
+        costReported: rawTurns.some((t) => t.costReported),
         contextWindow: null, peakInputTokens: 0, peakTurnTokens: 0, rateLimit: null,
       });
     }
   }
   if (!sessions.length) return emptyResult(source, capabilities, [{ type: 'no-sessions', message: 'No Claude Code sessions with usage found.' }]);
+  const unpriced = unpricedModelWarning(sessions);
+  if (unpriced) warnings.push(unpriced);
   const result = buildResult(sessions, source, capabilities, warnings);
   result.limitEvents = summarizeLimitHits(limitHits);
   return result;
@@ -275,4 +334,4 @@ async function content(session, options = {}) {
   return { items, promptTemplate };
 }
 
-module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content, _test: { getPricing } };
+module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content, _test: { getPricing, latestCostState, reconcileWithCostState } };

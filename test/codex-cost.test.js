@@ -146,3 +146,99 @@ test('keeps rate-limit snapshots that do not contain token usage', () => {
   assert.equal(session.rateLimit.planType, 'plus');
   assert.equal(session.rateLimit.primaryUsedPercent, 42);
 });
+
+test('drops the replayed ancestor burst in a forked or subagent rollout', () => {
+  const forkMeta = {
+    type: 'session_meta',
+    timestamp: '2026-08-18T12:00:00.000Z',
+    payload: {
+      id: 'child-session', timestamp: '2026-08-18T12:00:00.000Z',
+      model: 'gpt-5.6-sol', cwd: path.resolve('project'), forked_from_id: 'parent-session',
+    },
+  };
+  // Copied ancestor history, re-stamped moments after the fork's own meta —
+  // already counted once in the parent's own rollout file.
+  const replayedAncestorUsage = tokenEvent({ input: 5000, cached: 1000, output: 500, timestamp: '2026-08-18T12:00:00.030Z' });
+  // A real turn, separated by several seconds — this is genuine to the fork.
+  const genuineUsage = tokenEvent({ input: 100, cached: 0, output: 20, timestamp: '2026-08-18T12:00:07.000Z' });
+
+  const session = _test.extractSession(
+    [forkMeta, replayedAncestorUsage, genuineUsage],
+    path.resolve('sessions', 'rollout-child.jsonl'), {}, {},
+  );
+
+  assert.equal(session.turnCount, 1, 'the replayed ancestor burst should be dropped');
+  assert.equal(session.inputTokens, 100);
+  assert.equal(session.outputTokens, 20);
+});
+
+test('subagent thread_spawn is recognized the same way as a plain fork', () => {
+  const spawnMeta = {
+    type: 'session_meta',
+    timestamp: '2026-08-18T12:00:00.000Z',
+    payload: {
+      id: 'subagent-session', timestamp: '2026-08-18T12:00:00.000Z', model: 'gpt-5.6-sol',
+      cwd: path.resolve('project'), source: { subagent: { thread_spawn: { parent_thread_id: 'parent-session' } } },
+    },
+  };
+  const replayed = tokenEvent({ input: 5000, output: 500, timestamp: '2026-08-18T12:00:00.010Z' });
+  const genuine = tokenEvent({ input: 50, output: 5, timestamp: '2026-08-18T12:00:06.000Z' });
+  const session = _test.extractSession([spawnMeta, replayed, genuine], path.resolve('sessions', 'rollout-subagent.jsonl'), {}, {});
+
+  assert.equal(session.turnCount, 1);
+  assert.equal(session.inputTokens, 50);
+});
+
+test('a session_meta without a fork or subagent marker never suppresses anything', () => {
+  const plainMeta = {
+    type: 'session_meta',
+    timestamp: '2026-08-18T12:00:00.000Z',
+    payload: { id: 'plain-session', timestamp: '2026-08-18T12:00:00.000Z', model: 'gpt-5.6-sol', cwd: path.resolve('project') },
+  };
+  const first = tokenEvent({ input: 10, output: 1, timestamp: '2026-08-18T12:00:00.010Z' });
+  const second = tokenEvent({ input: 20, output: 2, timestamp: '2026-08-18T12:00:00.020Z' });
+  const session = _test.extractSession([plainMeta, first, second], path.resolve('sessions', 'rollout-plain.jsonl'), {}, {});
+
+  assert.equal(session.turnCount, 2);
+  assert.equal(session.inputTokens, 30);
+});
+
+test('isForkedSessionMeta recognizes both fork and subagent-spawn shapes', () => {
+  assert.equal(_test.isForkedSessionMeta({ forked_from_id: 'abc' }), true);
+  assert.equal(_test.isForkedSessionMeta({ source: { subagent: { thread_spawn: { parent_thread_id: 'abc' } } } }), true);
+  assert.equal(_test.isForkedSessionMeta({}), false);
+  assert.equal(_test.isForkedSessionMeta({ source: { subagent: {} } }), false);
+});
+
+test('stripForkedHistory drops the burst but keeps entries before and after it', () => {
+  const before = { type: 'response_item', timestamp: '2026-08-18T11:59:00.000Z', payload: { type: 'message' } };
+  const meta = {
+    type: 'session_meta', timestamp: '2026-08-18T12:00:00.000Z',
+    payload: { id: 'child-session', forked_from_id: 'parent-session' },
+  };
+  const replayedMeta = { type: 'session_meta', timestamp: '2026-08-18T12:00:00.005Z', payload: { id: 'parent-session' } };
+  const replayedBurst = { type: 'response_item', timestamp: '2026-08-18T12:00:00.030Z', payload: { type: 'message' } };
+  const genuine = { type: 'response_item', timestamp: '2026-08-18T12:00:07.000Z', payload: { type: 'message' } };
+
+  const result = _test.stripForkedHistory([before, meta, replayedMeta, replayedBurst, genuine]);
+  assert.deepEqual(result, [before, meta, genuine]);
+});
+
+test('stripForkedHistory drops every entry when the burst never ends before EOF', () => {
+  const meta = { type: 'session_meta', timestamp: '2026-08-18T12:00:00.000Z', payload: { forked_from_id: 'parent-session' } };
+  const replayed1 = { type: 'response_item', timestamp: '2026-08-18T12:00:00.010Z', payload: {} };
+  const replayed2 = { type: 'response_item', timestamp: '2026-08-18T12:00:00.020Z', payload: {} };
+  assert.deepEqual(_test.stripForkedHistory([meta, replayed1, replayed2]), [meta]);
+});
+
+test('stripForkedHistory is a no-op for a plain, unforked session', () => {
+  const meta = { type: 'session_meta', timestamp: '2026-08-18T12:00:00.000Z', payload: { id: 'plain' } };
+  const first = { type: 'response_item', timestamp: '2026-08-18T12:00:00.010Z', payload: {} };
+  const entries = [meta, first];
+  assert.deepEqual(_test.stripForkedHistory(entries), entries);
+});
+
+test('stripForkedHistory returns entries untouched when there is no session_meta at all', () => {
+  const entries = [{ type: 'response_item', timestamp: '2026-08-18T12:00:00.000Z', payload: {} }];
+  assert.deepEqual(_test.stripForkedHistory(entries), entries);
+});

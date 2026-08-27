@@ -391,4 +391,30 @@ function emptyResult(source, capabilities, warnings) {
   };
 }
 
-module.exports = { buildResult, emptyResult, buildPromptBreakdown };
+// Splits a session's turns into priced vs. unpriced token totals by whether
+// each turn's cost was actually estimated. Shared by every adapter that
+// distinguishes turns it has a rate for from ones it doesn't.
+function splitPricedTokens(turns) {
+  let pricedTokens = 0;
+  let unpricedTokens = 0;
+  for (const turn of turns) {
+    if (turn.costEstimated) pricedTokens += turn.totalTokens;
+    else unpricedTokens += turn.totalTokens;
+  }
+  return { pricedTokens, unpricedTokens };
+}
+
+// One warning naming every model across all sessions that had no official
+// rate, so its tokens were excluded from estimated cost. Returns null when
+// every turn was priced.
+function unpricedModelWarning(sessions) {
+  const models = new Set();
+  for (const session of sessions) for (const turn of session.turns) if (!turn.costEstimated) models.add(turn.model || 'unknown');
+  if (!models.size) return null;
+  return {
+    type: 'unpriced-model',
+    message: `No official API rate is configured for: ${[...models].sort().join(', ')}. Their tokens are excluded from estimated cost.`,
+  };
+}
+
+module.exports = { buildResult, emptyResult, buildPromptBreakdown, splitPricedTokens, unpricedModelWarning };
