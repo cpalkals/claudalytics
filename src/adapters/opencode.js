@@ -38,6 +38,13 @@ function loadSqlite() {
 // Anthropic/Google/xAI cache rates follow the standard 1.25x write / 0.1x read
 // multipliers; OpenAI bills cache reads at 0.1x and does not charge for writes.
 const M = 1e6;
+// A base-family rule must not price a named tier it has never heard of: within a
+// family the tiers differ by more than 10x (gpt-5.6-luna is $0.20/M input, plain
+// gpt-5.6 is $5.00/M), so inheriting a sibling's rate invents a number rather
+// than estimating one. `SNAPSHOT` lets a base rule still match its own dated
+// releases, while an unrecognised suffix falls through to null / unpriced.
+const SNAPSHOT = String.raw`(?:-\d{4}-\d{2}-\d{2}|-\d{6,8})?$`;
+const base = (family) => new RegExp(family + SNAPSHOT);
 const MODEL_PRICING = [
   // Anthropic
   [/(fable-5|mythos-5)/, { input: 10 / M, output: 50 / M, cacheWrite: 12.50 / M, cacheRead: 1.00 / M }],
@@ -51,12 +58,12 @@ const MODEL_PRICING = [
   [/gpt-5[-.]5-pro/, { input: 30 / M, output: 180 / M, cacheWrite: 0, cacheRead: 30 / M }],
   [/gpt-5[-.]6-luna/, { input: 0.20 / M, output: 1.20 / M, cacheWrite: 0, cacheRead: 0.02 / M }],
   [/gpt-5[-.]6-terra/, { input: 2.00 / M, output: 12 / M, cacheWrite: 0, cacheRead: 0.20 / M }],
-  [/gpt-5[-.](5|6)/, { input: 5.00 / M, output: 30 / M, cacheWrite: 0, cacheRead: 0.50 / M }],
+  [base('gpt-5[-.](5|6)'), { input: 5.00 / M, output: 30 / M, cacheWrite: 0, cacheRead: 0.50 / M }],
   [/gpt-5[-.]4-nano/, { input: 0.20 / M, output: 1.25 / M, cacheWrite: 0, cacheRead: 0.02 / M }],
   [/gpt-5[-.]4-mini/, { input: 0.75 / M, output: 4.50 / M, cacheWrite: 0, cacheRead: 0.075 / M }],
-  [/gpt-5[-.]4/, { input: 2.50 / M, output: 15 / M, cacheWrite: 0, cacheRead: 0.25 / M }],
-  [/gpt-5[-.](2|3)/, { input: 1.75 / M, output: 14 / M, cacheWrite: 0, cacheRead: 0.175 / M }],
-  [/gpt-5/, { input: 1.25 / M, output: 10 / M, cacheWrite: 0, cacheRead: 0.125 / M }],
+  [base('gpt-5[-.]4'), { input: 2.50 / M, output: 15 / M, cacheWrite: 0, cacheRead: 0.25 / M }],
+  [base('gpt-5[-.](2|3)'), { input: 1.75 / M, output: 14 / M, cacheWrite: 0, cacheRead: 0.175 / M }],
+  [base('gpt-5'), { input: 1.25 / M, output: 10 / M, cacheWrite: 0, cacheRead: 0.125 / M }],
   // Google
   [/gemini-3.*(flash|lite)/, { input: 0.30 / M, output: 2.50 / M, cacheWrite: 0.375 / M, cacheRead: 0.03 / M }],
   [/gemini-3/, { input: 2.00 / M, output: 12 / M, cacheWrite: 2.50 / M, cacheRead: 0.20 / M }],
@@ -218,6 +225,10 @@ async function parse(options = {}) {
           }
           const usage = usageFromParts(parts, d);
           const model = d.modelID || d.model?.modelID || 'unknown';
+          // Which upstream actually served the turn. OpenCode talks to many
+          // providers, and only openrouter traffic can be reconciled against an
+          // OpenRouter bill - the rest never appears on that account.
+          const provider = d.providerID || d.provider?.id || null;
           const { freshInputTokens, cacheWriteTokens, recordedCost, ...tokens } = usage;
           // Trust OpenCode's own number when it has one (it prices from models.dev at
           // request time, which beats any table we ship). Back-fill from our own rates
@@ -228,6 +239,7 @@ async function parse(options = {}) {
             timestamp: new Date(m.time_created).toISOString(),
             prompt: pendingPrompt,
             model,
+            provider,
             ...tokens,
             contextWindow: null,
             cost: recordedCost > 0 ? recordedCost : (estimate || 0),

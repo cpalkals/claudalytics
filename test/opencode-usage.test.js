@@ -99,6 +99,16 @@ test('prices known models and refuses to guess at unknown ones', () => {
   assert.equal(getPricing('gemini-3-pro').output, 12 / 1e6);
   assert.equal(getPricing('my-local-llama'), null);
   assert.equal(getPricing('unknown'), null);
+  // A base-family rate must not leak onto a named tier we have no price for:
+  // gpt-5.6-luna is 25x cheaper than plain gpt-5.6, so guessing invents money.
+  assert.equal(getPricing('gpt-5.6-luna').input, 0.20 / 1e6);
+  assert.equal(getPricing('gpt-5.6').input, 5.00 / 1e6);
+  assert.equal(getPricing('gpt-5.6-sol'), null);
+  assert.equal(getPricing('openai/gpt-5.6-sol-20260709'), null);
+  assert.equal(getPricing('gpt-5.4-turbo-experimental'), null);
+  // ...but a dated release of a family we do price still matches it.
+  assert.equal(getPricing('gpt-5.6-2026-07-09').input, 5.00 / 1e6);
+  assert.equal(getPricing('gpt-5.4-20260709').output, 15 / 1e6);
   assert.equal(estimateCost('my-local-llama', { freshInputTokens: 1e6, cacheWriteTokens: 0, cachedInputTokens: 0, outputTokens: 0 }), null);
 });
 
@@ -109,7 +119,7 @@ test('estimate charges fresh input, cache write, cache read and output separatel
   assert.equal(Number(cost.toFixed(4)), 5 + 6.25 + 0.5 + 25);
 });
 
-function sessionDb(dir, { model, recordedCost }) {
+function sessionDb(dir, { model, recordedCost, provider }) {
   const file = path.join(dir, 'opencode.db');
   const db = new DatabaseSync(file);
   db.exec(`
@@ -121,7 +131,7 @@ function sessionDb(dir, { model, recordedCost }) {
   db.prepare('INSERT INTO session (id, project_id, directory, title, model, time_created, time_updated) VALUES (?,?,?,?,?,?,?)')
     .run('ses_1', 'prj', '/tmp/proj', 'demo', JSON.stringify({ modelID: model }), 1000, 2000);
   db.prepare('INSERT INTO message (id, session_id, time_created, data) VALUES (?,?,?,?)')
-    .run('msg_a', 'ses_1', 1500, JSON.stringify({ role: 'assistant', modelID: model, cost: recordedCost }));
+    .run('msg_a', 'ses_1', 1500, JSON.stringify({ role: 'assistant', modelID: model, providerID: provider, cost: recordedCost }));
   db.prepare('INSERT INTO part (id, message_id, session_id, data) VALUES (?,?,?,?)')
     .run('prt_s', 'msg_a', 'ses_1', JSON.stringify(step(1e6, 1e6, 0, 1e6, 1e6, recordedCost)));
   db.close();
@@ -160,5 +170,31 @@ test('marks tokens unpriced when neither OpenCode nor our table has a rate', asy
   assert.equal(s.pricedTokens, 0);
   assert.equal(s.unpricedTokens, s.totalTokens);
   assert.ok(result.warnings.some((w) => w.type === 'cost-unpriced'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('records the upstream provider and rolls it up per provider', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-provider-'));
+  sessionDb(dir, { model: 'claude-opus-5', recordedCost: 0.5, provider: 'openrouter' });
+  const result = await adapter.parse({ home: dir });
+  assert.equal(result.sessions[0].turns[0].provider, 'openrouter');
+  assert.deepEqual(result.providerBreakdown.map((r) => r.provider), ['openrouter']);
+  assert.equal(result.providerBreakdown[0].cost, 0.5);
+  assert.equal(result.providerBreakdown[0].turns, 1);
+  // Reported by OpenCode, so none of it is our own arithmetic.
+  assert.equal(result.providerBreakdown[0].backfilledCost, 0);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a non-OpenRouter provider leaves no OpenRouter row to reconcile against', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-other-provider-'));
+  sessionDb(dir, { model: 'claude-opus-5', recordedCost: 0, provider: 'openai' });
+  const result = await adapter.parse({ home: dir });
+  assert.equal(result.providerBreakdown.length, 1);
+  assert.equal(result.providerBreakdown[0].provider, 'openai');
+  assert.equal(result.providerBreakdown.some((r) => /openrouter/i.test(r.provider)), false);
+  // Whole figure came from our rate table, which is what suppresses the
+  // Difference tile in the dashboard.
+  assert.equal(Number(result.totals.backfilledCost.toFixed(4)), Number(result.totals.totalCost.toFixed(4)));
   fs.rmSync(dir, { recursive: true, force: true });
 });

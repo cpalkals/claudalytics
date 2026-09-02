@@ -69,7 +69,8 @@ function buildPromptBreakdown(turns, toolEvents, fallbackTitle) {
       turnId: turn.turnId, timestamp: turn.timestamp, model: turn.model,
       inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens, outputTokens: turn.outputTokens,
       reasoningOutputTokens: turn.reasoningOutputTokens, totalTokens: turn.totalTokens, contextWindow: turn.contextWindow,
-      cost: turn.cost, costEstimated: turn.costEstimated, longContextPricing: turn.longContextPricing,
+      cost: turn.cost, costEstimated: turn.costEstimated, costBackfilled: turn.costBackfilled,
+      provider: turn.provider, longContextPricing: turn.longContextPricing,
       tools: turn.tools, hasText: turn.hasText,
     });
   }
@@ -105,10 +106,19 @@ function generateInsights(sessions, totals, largestTurns, topPrompts, weekdayUsa
     const coverage = totals.costCoverage < 1
       ? ` ${fmt(totals.unpricedTokens)} tokens from models without a configured official rate are excluded.`
       : '';
+    // When the agent reported no cost of its own, every dollar here came from our
+    // own rate table. Worth saying outright: it is what the same tokens would have
+    // cost on the public API, not money anyone charged you.
+    const backfilledPct = totals.totalCost > 0 ? (totals.backfilledCost || 0) / totals.totalCost : 0;
+    const backfill = backfilledPct >= 0.99
+      ? ' The agent recorded no cost at all for this window, so the whole figure is derived from published list rates here.'
+      : backfilledPct > 0.05
+        ? ` About $${totals.backfilledCost.toFixed(2)} of it is derived from published list rates rather than reported by the agent.`
+        : '';
     insights.push({
       type: 'info',
       title: `Estimated API-equivalent spend: $${totals.totalCost.toFixed(2)}`,
-      detail: `Across ${fmt(totals.pricedTokens)} priced tokens. This is a standard API-rate estimate, not your subscription bill.${coverage}`,
+      detail: `Across ${fmt(totals.pricedTokens)} priced tokens. This is a standard API-rate estimate, not your subscription bill.${coverage}${backfill}`,
       action: 'Sort the sessions and prompts tables by tokens to find the few threads driving most of the estimated cost.',
     });
   }
@@ -266,9 +276,10 @@ function buildResult(sessions, source, capabilities, warnings = []) {
   const totals = {
     totalSessions: sessions.length, totalTurns: 0, totalPrompts: 0, totalToolCalls: 0,
     inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0,
-    totalCost: 0, pricedTokens: 0, unpricedTokens: 0, costCoverage: 1,
+    totalCost: 0, pricedTokens: 0, unpricedTokens: 0, costCoverage: 1, backfilledCost: 0,
     avgTokensPerTurn: 0, avgTokensPerSession: 0, dateRange: null, latestRateLimit: null,
   };
+  const providerMap = {};
 
   for (const session of sessions) {
     totals.totalTurns += session.turnCount;
@@ -277,6 +288,7 @@ function buildResult(sessions, source, capabilities, warnings = []) {
     totals.totalCost += session.cost || 0;
     totals.pricedTokens += session.pricedTokens ?? session.totalTokens ?? 0;
     totals.unpricedTokens += session.unpricedTokens || 0;
+    totals.backfilledCost += session.backfilledCost || 0;
     addMetric(totals, session);
 
     // Bucket by each turn's own date/weekday, not the session's start date — a
@@ -291,6 +303,17 @@ function buildResult(sessions, source, capabilities, warnings = []) {
       addMetric(dailyMap[day], turn);
       addCostMetric(dailyMap[day], turn);
       daysTouched.add(day);
+
+      // Only adapters that record an upstream provider contribute here; the rest
+      // leave providerBreakdown empty, which callers read as "not known".
+      if (turn.provider) {
+        const key = turn.provider;
+        if (!providerMap[key]) providerMap[key] = { provider: key, turns: 0, totalTokens: 0, cost: 0, backfilledCost: 0 };
+        providerMap[key].turns += 1;
+        providerMap[key].totalTokens += turn.totalTokens || 0;
+        providerMap[key].cost += turn.cost || 0;
+        if (turn.costBackfilled) providerMap[key].backfilledCost += turn.cost || 0;
+      }
 
       if (turn.timestamp) {
         const wd = new Date(turn.timestamp).getDay();
@@ -369,6 +392,7 @@ function buildResult(sessions, source, capabilities, warnings = []) {
     modelBreakdown: Object.values(modelMap).sort((a, b) => b.totalTokens - a.totalTokens),
     projectBreakdown: Object.values(projectMap).sort((a, b) => b.totalTokens - a.totalTokens),
     toolBreakdown: Object.values(toolMap).sort((a, b) => b.count - a.count),
+    providerBreakdown: Object.values(providerMap).sort((a, b) => b.totalTokens - a.totalTokens),
     largestTurns: largestTurns.slice(0, 30),
     topPrompts: topPrompts.slice(0, 50),
     insights: generateInsights(sessions, totals, largestTurns, topPrompts, weekdayUsage, caps),
@@ -380,11 +404,11 @@ function emptyResult(source, capabilities, warnings) {
   return {
     source, capabilities,
     sessions: [], dailyUsage: [], weekdayUsage: [], modelBreakdown: [], projectBreakdown: [], toolBreakdown: [],
-    largestTurns: [], topPrompts: [], insights: [],
+    providerBreakdown: [], largestTurns: [], topPrompts: [], insights: [],
     totals: {
       totalSessions: 0, totalTurns: 0, totalPrompts: 0, totalToolCalls: 0,
       inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0,
-      totalCost: 0, pricedTokens: 0, unpricedTokens: 0, costCoverage: 1,
+      totalCost: 0, pricedTokens: 0, unpricedTokens: 0, costCoverage: 1, backfilledCost: 0,
       avgTokensPerTurn: 0, avgTokensPerSession: 0, dateRange: null, latestRateLimit: null,
     },
     warnings,

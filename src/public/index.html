@@ -422,20 +422,53 @@ function paintSpend(){
   const rem=document.getElementById('orRemember');if(rem)rem.checked=kept.remember;
   if(kept.focused){next.focus();try{next.setSelectionRange(kept.start,kept.end)}catch{}}
 }
+// Which upstream actually served the local turns. OpenCode talks to many
+// providers, so "is this OpenCode?" is not the same question as "did any of this
+// go through OpenRouter?" - and only the latter can be reconciled against an
+// OpenRouter bill. `known:false` means the data predates provider capture, in
+// which case we fall back to the old whole-estimate behaviour.
+function orLocalSpend(){
+  const rows=(DATA&&DATA.providerBreakdown)||[];
+  if(!rows.length)return{known:false,row:null};
+  return{known:true,row:rows.find(r=>/openrouter/i.test(r.provider||''))||null};
+}
 function spendCard(){
-  // OpenRouter is the provider behind OpenCode here. Putting its account-wide
-  // spend next to, say, Claude Code's estimate would compare unrelated numbers.
+  // Account-wide OpenRouter spend next to, say, Claude Code's estimate would
+  // compare unrelated numbers, so the card stays OpenCode-only.
   if(!DATA||!DATA.source||DATA.source.id!=='opencode')return'';
   if(!ORKEY||!ORKEY.configured)return connectCard();
   if(!SPEND)return`<div class="card or-card anim"><div class="or-head"><div><span class="or-title">OpenRouter actual</span> <span class="muted">loading…</span></div>${keyControls()}</div></div>`;
   if(!SPEND.ok)return`<div class="card or-card anim"><div class="or-head"><div><span class="or-title">OpenRouter actual</span></div>${keyControls()}</div><div class="or-note">${esc((SPEND.warnings||['OpenRouter lookup failed.'])[0])}</div></div>`;
-  const actual=Number(SPEND.cost||0), est=Number((DATA&&DATA.totals&&DATA.totals.totalCost)||0);
+  const actual=Number(SPEND.cost||0);
+  const local=orLocalSpend();
+  // Compare like with like: only the turns OpenRouter actually served, not the
+  // whole multi-provider estimate.
+  const est=local.known?Number((local.row&&local.row.cost)||0):Number((DATA&&DATA.totals&&DATA.totals.totalCost)||0);
+  const other=Number((DATA&&DATA.totals&&DATA.totals.totalCost)||0)-est;
+  // Nothing local went through OpenRouter, so there is no estimate to hold the
+  // bill against - show the bill alone rather than a difference that only
+  // restates it with a minus sign.
+  const comparable=local.known?Boolean(local.row):true;
+  // An estimate our own rate table invented is not a second opinion on a bill;
+  // differencing the two would dress a guess up as a discrepancy.
+  const backfilled=local.known&&local.row?Number(local.row.backfilledCost||0):Number((DATA&&DATA.totals&&DATA.totals.backfilledCost)||0);
+  const derived=est>0&&backfilled/est>=0.99;
   const delta=actual-est, pct=actual>0?Math.round(delta/actual*100):null;
   const label=RANGE_LABEL[range]||'All time';
-  const verdict=est===0?'no local estimate to compare'
+  const estLabel=!comparable?'Estimated for OpenRouter':derived?'Est. list-rate equivalent':'Estimated here';
+  const verdict=!comparable?'none of these sessions used OpenRouter'
+    :derived?'derived from list rates, not reported'
+    :est===0?'no local estimate to compare'
     :pct===null?'no OpenRouter spend in this window'
     :Math.abs(pct)<=10?`within ${Math.abs(pct)}% of the estimate`
     :`estimate is ${pct>0?'under':'over'} by ${Math.abs(pct)}%`;
+  const scopeNote=!comparable
+    ?`These OpenCode sessions ran on ${esc(((DATA.providerBreakdown||[]).map(r=>r.provider).join(', '))||'another provider')}, not OpenRouter, so the figure on the left is unrelated to them — it is other traffic on the same account.`
+    :other>0.005?`Comparison covers OpenRouter turns only; a further ${fmtCost(other)} of estimated cost ran on other providers.`
+    :'';
+  const derivedNote=derived&&comparable
+    ?'OpenCode recorded no cost for these turns, so the estimate is this dashboard’s own list-rate arithmetic. It is what the tokens would cost on the public API, not a second reading of your bill — so no difference is shown.'
+    :'';
   const models=(SPEND.byModel||[]).slice(0,5);
   const windowNote=orWindowNote();
   const credits=SPEND.credits?`<span class="or-chip">$${SPEND.credits.remaining.toFixed(2)} credits left</span>`:'';
@@ -447,9 +480,11 @@ function spendCard(){
     </div>
     <div class="or-figures">
       <div class="or-fig"><div class="label">Billed by OpenRouter</div><div class="value">${fmtCost(actual)}</div><div class="hint">${SPEND.requests!=null?fmt(SPEND.requests)+' requests':'&nbsp;'}</div></div>
-      <div class="or-fig"><div class="label">Estimated here</div><div class="value">${fmtCost(est)}</div><div class="hint">${esc(verdict)}</div></div>
-      <div class="or-fig"><div class="label">Difference</div><div class="value ${delta>0?'up':delta<0?'down':''}">${delta>=0?'+':'−'}${fmtCost(Math.abs(delta))}</div><div class="hint">actual minus estimate</div></div>
+      <div class="or-fig"><div class="label">${esc(estLabel)}</div><div class="value">${comparable?fmtCost(est):'—'}</div><div class="hint">${esc(verdict)}</div></div>
+      ${comparable&&!derived?`<div class="or-fig"><div class="label">Difference</div><div class="value ${delta>0?'up':delta<0?'down':''}">${delta>=0?'+':'−'}${fmtCost(Math.abs(delta))}</div><div class="hint">actual minus estimate</div></div>`:''}
     </div>
+    ${scopeNote?`<div class="or-matched">${scopeNote}</div>`:''}
+    ${derivedNote?`<div class="or-matched">${esc(derivedNote)}</div>`:''}
     ${models.length?`<table class="or-models"><thead><tr><th>Model</th><th class="num">Requests</th><th class="num">Tokens</th><th class="num">Billed</th></tr></thead><tbody>${models.map(m=>`<tr><td>${esc(m.model)}</td><td class="num">${fmt(m.requests)}</td><td class="num">${fmt(m.tokens)}</td><td class="num">${fmtCost(m.cost)}</td></tr>`).join('')}</tbody></table>`:''}
     ${matchedNote()?`<div class="or-matched">${esc(matchedNote())}</div>`:''}
     <div class="or-note">${(SPEND.caveats||[]).concat(SPEND.warnings||[]).map(esc).join(' ')}</div>

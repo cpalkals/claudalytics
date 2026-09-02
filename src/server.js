@@ -28,6 +28,7 @@ function rescopeSession(session, turns) {
     cost: sum('cost'),
     pricedTokens: turns.filter((turn) => turn.costEstimated !== false).reduce((t, turn) => t + (turn.totalTokens || 0), 0),
     unpricedTokens: turns.filter((turn) => turn.costEstimated === false).reduce((t, turn) => t + (turn.totalTokens || 0), 0),
+    backfilledCost: turns.filter((turn) => turn.costBackfilled).reduce((t, turn) => t + (turn.cost || 0), 0),
     promptCount: promptBreakdown.length,
     promptBreakdown,
     peakInputTokens: turns.reduce((m, t) => Math.max(m, t.inputTokens || 0), 0),
