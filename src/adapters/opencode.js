@@ -94,7 +94,10 @@ function estimateCost(model, usage) {
 }
 
 function safeParse(json) {
-  try { return JSON.parse(json); } catch { return {}; }
+  try {
+    const value = JSON.parse(json);
+    return value && typeof value === 'object' ? value : {};
+  } catch { return {}; }
 }
 
 // OpenCode writes one `step-finish` part per model round-trip, each carrying that
