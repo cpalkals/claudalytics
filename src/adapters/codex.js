@@ -30,6 +30,7 @@ const MODEL_PRICING = {
   'gpt-5.6-terra': { input: 2.00 / 1e6, cachedInput: 0.20 / 1e6, output: 12.00 / 1e6, longContext: true },
   'gpt-5.6-sol': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6, longContext: true },
   'gpt-5.6': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6, longContext: true },
+  'gpt-6-astra': { input: 10.00 / 1e6, cachedInput: 1.00 / 1e6, output: 50.00 / 1e6, longContext: true },
 };
 const LONG_CONTEXT_THRESHOLD = 272000;
 // Longest key first, so e.g. "gpt-5.4-mini" matches before the "gpt-5.4" fallback.
@@ -279,7 +280,7 @@ async function parse(options = {}) {
   const source = {
     id, label, mark, accent, home: h,
     costBasis: 'Standard OpenAI API text-token rates',
-    costUpdated: '2026-08-18',
+    costUpdated: '2026-09-12',
     costDisclaimer: 'API-equivalent estimate, not a ChatGPT subscription bill. Cache-write charges are excluded because Codex logs do not report cache-write tokens.',
   };
   if (!fs.existsSync(h)) return emptyResult(source, capabilities, [{ type: 'missing-dir', message: `Codex home not found at ${h}` }]);

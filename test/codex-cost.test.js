@@ -70,6 +70,17 @@ test('uses the official standard GPT-5.2 rates', () => {
   assert.ok(Math.abs(estimate.cost - 0.000252) < 1e-12);
 });
 
+test('uses the official standard GPT-6-Astra rates', () => {
+  const pricing = _test.getPricing('gpt-6-astra');
+  assert.equal(pricing.input * 1e6, 10);
+  assert.equal(pricing.cachedInput * 1e6, 1);
+  assert.equal(pricing.output * 1e6, 50);
+
+  const estimate = _test.estimateCost(usage(100, 40, 10), 'gpt-6-astra');
+  assert.equal(estimate.longContext, false);
+  assert.ok(Math.abs(estimate.cost - 0.00114) < 1e-12);
+});
+
 test('applies the full-request long-context rates above 272K input tokens', () => {
   const estimate = _test.estimateCost(usage(300000, 200000, 1000), 'gpt-5.6-terra');
   assert.equal(estimate.longContext, true);
