@@ -37,10 +37,13 @@ function summarizeLimitHits(hits) {
 }
 
 // Anthropic API per-token pricing (estimate; subscription billing differs).
-// Cache rates are the standard 1.25x write / 0.1x read multipliers on input.
-// List rates as of 2026-08-26.
+// Cache rates are the standard 1.25x write / 0.1x read multipliers on input,
+// except Fable 5.1 / Mythos 5.1 (0.025x read) and Opus 5.5 (0.05x read).
+// List rates as of 2026-09-23.
 const MODEL_PRICING = {
+  'fable-5.1': { input: 10 / 1e6, output: 50 / 1e6, cacheWrite: 12.50 / 1e6, cacheRead: 0.25 / 1e6 },
   'fable-5': { input: 10 / 1e6, output: 50 / 1e6, cacheWrite: 12.50 / 1e6, cacheRead: 1.00 / 1e6 },
+  'opus-5.5': { input: 4 / 1e6, output: 20 / 1e6, cacheWrite: 5 / 1e6, cacheRead: 0.20 / 1e6 },
   'opus-5': { input: 5 / 1e6, output: 25 / 1e6, cacheWrite: 6.25 / 1e6, cacheRead: 0.50 / 1e6 },
   'opus-4.0': { input: 15 / 1e6, output: 75 / 1e6, cacheWrite: 18.75 / 1e6, cacheRead: 1.50 / 1e6 },
   'sonnet-5': { input: 2 / 1e6, output: 10 / 1e6, cacheWrite: 2.50 / 1e6, cacheRead: 0.20 / 1e6 },
@@ -50,8 +53,11 @@ const MODEL_PRICING = {
 };
 // Model ids arrive dashed (claude-opus-4-6) or dotted (opus-4.6), so every
 // version test below accepts either spelling.
+// `(?!\d)` keeps a dated snapshot such as opus-5-20260401 off the 5.5 tier.
 const PRICING_RULES = [
+  [/(fable|mythos)-5[-.]1(?!\d)/, MODEL_PRICING['fable-5.1']],
   [/(fable|mythos)/, MODEL_PRICING['fable-5']],
+  [/opus-5[-.]5(?!\d)/, MODEL_PRICING['opus-5.5']],
   // Opus 4.5 introduced the $5/$25 tier and every release since has kept it.
   [/opus-(5|4[-.](5|6|7|8|9))/, MODEL_PRICING['opus-5']],
   [/opus/, MODEL_PRICING['opus-4.0']],

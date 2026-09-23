@@ -28,8 +28,11 @@ const MODEL_PRICING = {
   'gpt-5.5': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6, longContext: true },
   'gpt-5.6-luna': { input: 0.20 / 1e6, cachedInput: 0.02 / 1e6, output: 1.20 / 1e6, longContext: true },
   'gpt-5.6-terra': { input: 2.00 / 1e6, cachedInput: 0.20 / 1e6, output: 12.00 / 1e6, longContext: true },
-  'gpt-5.6-sol': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6, longContext: true },
+  // Promotional rate, listed as available at least through 2026-11-21.
+  'gpt-5.6-sol': { input: 4.00 / 1e6, cachedInput: 0.40 / 1e6, output: 20.00 / 1e6, longContext: true },
   'gpt-5.6': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6, longContext: true },
+  'gpt-6-luna': { input: 0.10 / 1e6, cachedInput: 0.01 / 1e6, output: 0.50 / 1e6, longContext: true },
+  'gpt-6-sol': { input: 2.00 / 1e6, cachedInput: 0.20 / 1e6, output: 10.00 / 1e6, longContext: true },
   'gpt-6-astra': { input: 10.00 / 1e6, cachedInput: 1.00 / 1e6, output: 50.00 / 1e6, longContext: true },
 };
 const LONG_CONTEXT_THRESHOLD = 272000;
@@ -280,7 +283,7 @@ async function parse(options = {}) {
   const source = {
     id, label, mark, accent, home: h,
     costBasis: 'Standard OpenAI API text-token rates',
-    costUpdated: '2026-09-12',
+    costUpdated: '2026-09-23',
     costDisclaimer: 'API-equivalent estimate, not a ChatGPT subscription bill. Cache-write charges are excluded because Codex logs do not report cache-write tokens.',
   };
   if (!fs.existsSync(h)) return emptyResult(source, capabilities, [{ type: 'missing-dir', message: `Codex home not found at ${h}` }]);

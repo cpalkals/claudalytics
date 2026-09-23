@@ -81,6 +81,22 @@ test('uses the official standard GPT-6-Astra rates', () => {
   assert.ok(Math.abs(estimate.cost - 0.00114) < 1e-12);
 });
 
+test('uses the official standard GPT-6 Sol and Luna rates', () => {
+  const sol = _test.getPricing('gpt-6-sol');
+  assert.deepEqual([sol.input * 1e6, sol.cachedInput * 1e6, sol.output * 1e6].map((n) => Number(n.toFixed(4))), [2, 0.2, 10]);
+  const luna = _test.getPricing('gpt-6-luna');
+  assert.deepEqual([luna.input * 1e6, luna.cachedInput * 1e6, luna.output * 1e6].map((n) => Number(n.toFixed(4))), [0.1, 0.01, 0.5]);
+  // Long context: 2x input, 1.5x output ($15 output on GPT-6 Sol per the pricing page).
+  const estimate = _test.estimateCost(usage(300000, 0, 1000), 'gpt-6-sol');
+  assert.equal(estimate.longContext, true);
+  assert.ok(Math.abs(estimate.cost - (300000 * 4 + 1000 * 15) / 1e6) < 1e-9);
+});
+
+test('uses the current GPT-5.6 Sol promotional rates', () => {
+  const pricing = _test.getPricing('gpt-5.6-sol');
+  assert.deepEqual([pricing.input * 1e6, pricing.cachedInput * 1e6, pricing.output * 1e6].map((n) => Number(n.toFixed(4))), [4, 0.4, 20]);
+});
+
 test('applies the full-request long-context rates above 272K input tokens', () => {
   const estimate = _test.estimateCost(usage(300000, 200000, 1000), 'gpt-5.6-terra');
   assert.equal(estimate.longContext, true);
