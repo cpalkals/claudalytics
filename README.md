@@ -15,7 +15,7 @@ A unified, local dashboard for **multiple coding agents** — pick an agent in t
 header and see its own usage. Auto-detects whatever you have installed.
 
 ```bash
-npx github:cpalkals/claudalytics
+npx --allow-git=root github:cpalkals/claudalytics
 ```
 
 | Agent | Reads | Tokens | Reasoning | Cache | Est. cost | Rate limit |
@@ -29,12 +29,15 @@ npx github:cpalkals/claudalytics
 ## Run
 
 ```bash
-npx github:cpalkals/claudalytics
+npx --allow-git=root github:cpalkals/claudalytics
 ```
 
 That's it — it opens a dashboard in your browser. You'll just need `git`
 installed, since npx clones this repo directly rather than pulling from the
 npm registry. No GitHub auth needed — the repo is public.
+
+`--allow-git=root` is required on npm 12+, which refuses to fetch from git by
+default. It permits only this top-level package to come from git.
 
 Or from a clone:
 
