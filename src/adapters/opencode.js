@@ -34,9 +34,11 @@ function loadSqlite() {
 
 // Fallback pricing, $ per token, used only to back-fill turns where OpenCode
 // recorded $0 - models with no models.dev entry (custom, local, or proxied
-// providers). Rates are the providers' published list prices as of 2026-08-26.
-// Anthropic/Google/xAI cache rates follow the standard 1.25x write / 0.1x read
-// multipliers; OpenAI bills cache reads at 0.1x and does not charge for writes.
+// providers). Rates are the providers' published list prices as of 2026-11-11
+// (Anthropic, OpenAI) and 2026-08-26 (the rest). Cache writes are 1.25x input
+// except on OpenAI models before GPT-5.6, which do not charge for them. Cache
+// reads are 0.1x input except where a row says otherwise. OpenCode records cache
+// writes without their TTL, so Anthropic 1-hour writes (2x) are priced at 1.25x.
 const M = 1e6;
 // A base-family rule must not price a named tier it has never heard of: within a
 // family the tiers differ by more than 10x (gpt-5.6-luna is $0.20/M input, plain
@@ -47,18 +49,36 @@ const SNAPSHOT = String.raw`(?:-\d{4}-\d{2}-\d{2}|-\d{6,8})?$`;
 const base = (family) => new RegExp(family + SNAPSHOT);
 const MODEL_PRICING = [
   // Anthropic
+  [/(fable|mythos)-5[-.]2(?!\d)/, { input: 8 / M, output: 40 / M, cacheWrite: 10 / M, cacheRead: 0.20 / M }],
+  [/(fable|mythos)-5[-.]1(?!\d)/, { input: 10 / M, output: 50 / M, cacheWrite: 12.50 / M, cacheRead: 0.25 / M }],
   [/(fable-5|mythos-5)/, { input: 10 / M, output: 50 / M, cacheWrite: 12.50 / M, cacheRead: 1.00 / M }],
+  [/opus-5[-.]5(?!\d)/, { input: 4 / M, output: 20 / M, cacheWrite: 5 / M, cacheRead: 0.20 / M }],
   [/(opus-5|opus-4[-.]8|opus-4[-.]7|opus-4[-.]6|opus-4[-.]5)/, { input: 5 / M, output: 25 / M, cacheWrite: 6.25 / M, cacheRead: 0.50 / M }],
   [/opus/, { input: 15 / M, output: 75 / M, cacheWrite: 18.75 / M, cacheRead: 1.50 / M }],
+  [/sonnet-5[-.]5(?!\d)/, { input: 2 / M, output: 10 / M, cacheWrite: 2.50 / M, cacheRead: 0.10 / M }],
   [/sonnet-5/, { input: 2 / M, output: 10 / M, cacheWrite: 2.50 / M, cacheRead: 0.20 / M }],
   [/sonnet/, { input: 3 / M, output: 15 / M, cacheWrite: 3.75 / M, cacheRead: 0.30 / M }],
+  // Haiku 5.5 charges every token in a request at the higher rates once the
+  // prompt (fresh input + cache writes + cache reads) exceeds 100K tokens.
+  [/haiku-5[-.]5(?!\d)/, {
+    input: 0.10 / M, output: 0.50 / M, cacheWrite: 0.125 / M, cacheRead: 0.01 / M,
+    longPrompt: { threshold: 100000, rates: { input: 0.50 / M, output: 2.50 / M, cacheWrite: 0.625 / M, cacheRead: 0.05 / M } },
+  }],
   [/haiku-4[-.]5/, { input: 1 / M, output: 5 / M, cacheWrite: 1.25 / M, cacheRead: 0.10 / M }],
   [/haiku/, { input: 0.80 / M, output: 4 / M, cacheWrite: 1.00 / M, cacheRead: 0.08 / M }],
   // OpenAI
+  [/gpt-6-astra/, { input: 10 / M, output: 50 / M, cacheWrite: 12.50 / M, cacheRead: 1.00 / M }],
+  [/gpt-6[-.]1-sol/, { input: 2 / M, output: 10 / M, cacheWrite: 2.50 / M, cacheRead: 0.10 / M }],
+  [/gpt-6[-.]1-terra/, { input: 1 / M, output: 5 / M, cacheWrite: 1.25 / M, cacheRead: 0.05 / M }],
+  [/gpt-6-sol/, { input: 2 / M, output: 10 / M, cacheWrite: 2.50 / M, cacheRead: 0.20 / M }],
+  [/gpt-6-luna/, { input: 0.10 / M, output: 0.50 / M, cacheWrite: 0.125 / M, cacheRead: 0.01 / M }],
   [/gpt-5[-.]5-pro/, { input: 30 / M, output: 180 / M, cacheWrite: 0, cacheRead: 30 / M }],
-  [/gpt-5[-.]6-luna/, { input: 0.20 / M, output: 1.20 / M, cacheWrite: 0, cacheRead: 0.02 / M }],
-  [/gpt-5[-.]6-terra/, { input: 2.00 / M, output: 12 / M, cacheWrite: 0, cacheRead: 0.20 / M }],
-  [base('gpt-5[-.](5|6)'), { input: 5.00 / M, output: 30 / M, cacheWrite: 0, cacheRead: 0.50 / M }],
+  // Promotional rate, listed as available until 2026-11-30.
+  [/gpt-5[-.]6-sol/, { input: 4 / M, output: 20 / M, cacheWrite: 5 / M, cacheRead: 0.40 / M }],
+  [/gpt-5[-.]6-luna/, { input: 0.20 / M, output: 1.20 / M, cacheWrite: 0.25 / M, cacheRead: 0.02 / M }],
+  [/gpt-5[-.]6-terra/, { input: 2.00 / M, output: 12 / M, cacheWrite: 2.50 / M, cacheRead: 0.20 / M }],
+  [base('gpt-5[-.]6'), { input: 5.00 / M, output: 30 / M, cacheWrite: 6.25 / M, cacheRead: 0.50 / M }],
+  [base('gpt-5[-.]5'), { input: 5.00 / M, output: 30 / M, cacheWrite: 0, cacheRead: 0.50 / M }],
   [/gpt-5[-.]4-nano/, { input: 0.20 / M, output: 1.25 / M, cacheWrite: 0, cacheRead: 0.02 / M }],
   [/gpt-5[-.]4-mini/, { input: 0.75 / M, output: 4.50 / M, cacheWrite: 0, cacheRead: 0.075 / M }],
   [base('gpt-5[-.]4'), { input: 2.50 / M, output: 15 / M, cacheWrite: 0, cacheRead: 0.25 / M }],
@@ -84,13 +104,23 @@ function getPricing(model) {
   return null;
 }
 
+// Prompt-length tiers (Haiku 5.5) apply per model call, so a multi-step turn is
+// priced step by step: summed, its tool steps would cross the threshold long
+// before any single request does.
 function estimateCost(model, usage) {
   const pricing = getPricing(model);
   if (!pricing) return null;
-  return usage.freshInputTokens * pricing.input
-    + usage.cacheWriteTokens * pricing.cacheWrite
-    + usage.cachedInputTokens * pricing.cacheRead
-    + usage.outputTokens * pricing.output;
+  const calls = usage.steps && usage.steps.length ? usage.steps : [usage];
+  let cost = 0;
+  for (const call of calls) {
+    const promptTokens = call.freshInputTokens + call.cacheWriteTokens + call.cachedInputTokens;
+    const p = pricing.longPrompt && promptTokens > pricing.longPrompt.threshold ? pricing.longPrompt.rates : pricing;
+    cost += call.freshInputTokens * p.input
+      + call.cacheWriteTokens * p.cacheWrite
+      + call.cachedInputTokens * p.cacheRead
+      + call.outputTokens * p.output;
+  }
+  return cost;
 }
 
 function safeParse(json) {
@@ -110,13 +140,21 @@ function usageFromParts(parts, d) {
   const steps = parts.filter((p) => p && p.type === 'step-finish' && p.tokens);
   const num = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : 0);
   const acc = { fresh: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+  const calls = [];
   const add = (tk, cost) => {
     const cache = tk.cache || {};
-    acc.fresh += num(tk.input);
+    const call = {
+      freshInputTokens: num(tk.input),
+      cacheWriteTokens: num(cache.write),
+      cachedInputTokens: num(cache.read),
+      outputTokens: num(tk.output) + num(tk.reasoning),
+    };
+    calls.push(call);
+    acc.fresh += call.freshInputTokens;
     acc.output += num(tk.output);
     acc.reasoning += num(tk.reasoning);
-    acc.cacheRead += num(cache.read);
-    acc.cacheWrite += num(cache.write);
+    acc.cacheRead += call.cachedInputTokens;
+    acc.cacheWrite += call.cacheWriteTokens;
     acc.cost += Number.isFinite(Number(cost)) ? Number(cost) : 0;
   };
   if (steps.length) {
@@ -144,6 +182,8 @@ function usageFromParts(parts, d) {
     reasoningOutputTokens: acc.reasoning,
     totalTokens: input + output,
     recordedCost: acc.cost,
+    // One entry per model call, for rates that depend on a single request's size.
+    steps: calls,
   };
 }
 
@@ -232,7 +272,7 @@ async function parse(options = {}) {
           // providers, and only openrouter traffic can be reconciled against an
           // OpenRouter bill - the rest never appears on that account.
           const provider = d.providerID || d.provider?.id || null;
-          const { freshInputTokens, cacheWriteTokens, recordedCost, ...tokens } = usage;
+          const { freshInputTokens, cacheWriteTokens, recordedCost, steps, ...tokens } = usage;
           // Trust OpenCode's own number when it has one (it prices from models.dev at
           // request time, which beats any table we ship). Back-fill from our own rates
           // only when it recorded nothing - unpriced, custom, or proxied providers.

@@ -92,6 +92,19 @@ test('uses the official standard GPT-6 Sol and Luna rates', () => {
   assert.ok(Math.abs(estimate.cost - (300000 * 4 + 1000 * 15) / 1e6) < 1e-9);
 });
 
+test('uses the official standard GPT-6.1 Sol and Terra rates', () => {
+  const sol = _test.getPricing('gpt-6.1-sol');
+  assert.deepEqual([sol.input * 1e6, sol.cachedInput * 1e6, sol.output * 1e6].map((n) => Number(n.toFixed(4))), [2, 0.1, 10]);
+  const terra = _test.getPricing('gpt-6.1-terra');
+  assert.deepEqual([terra.input * 1e6, terra.cachedInput * 1e6, terra.output * 1e6].map((n) => Number(n.toFixed(4))), [1, 0.05, 5]);
+  // GPT-6 Sol keeps its own, higher cached-input rate.
+  assert.equal(Number((_test.getPricing('gpt-6-sol').cachedInput * 1e6).toFixed(4)), 0.2);
+  // Long context: $4 input / $15 output on GPT-6.1 Sol per the pricing page.
+  const estimate = _test.estimateCost(usage(300000, 0, 1000), 'gpt-6.1-sol');
+  assert.equal(estimate.longContext, true);
+  assert.ok(Math.abs(estimate.cost - (300000 * 4 + 1000 * 15) / 1e6) < 1e-9);
+});
+
 test('uses the current GPT-5.6 Sol promotional rates', () => {
   const pricing = _test.getPricing('gpt-5.6-sol');
   assert.deepEqual([pricing.input * 1e6, pricing.cachedInput * 1e6, pricing.output * 1e6].map((n) => Number(n.toFixed(4))), [4, 0.4, 20]);

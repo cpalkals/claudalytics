@@ -103,13 +103,39 @@ test('prices known models and refuses to guess at unknown ones', () => {
   // gpt-5.6-luna is 25x cheaper than plain gpt-5.6, so guessing invents money.
   assert.equal(getPricing('gpt-5.6-luna').input, 0.20 / 1e6);
   assert.equal(getPricing('gpt-5.6').input, 5.00 / 1e6);
-  assert.equal(getPricing('gpt-5.6-sol'), null);
-  assert.equal(getPricing('openai/gpt-5.6-sol-20260709'), null);
+  assert.equal(getPricing('gpt-5.6-nova'), null);
+  assert.equal(getPricing('openai/gpt-5.6-nova-20260709'), null);
   assert.equal(getPricing('gpt-5.4-turbo-experimental'), null);
   // ...but a dated release of a family we do price still matches it.
   assert.equal(getPricing('gpt-5.6-2026-07-09').input, 5.00 / 1e6);
   assert.equal(getPricing('gpt-5.4-20260709').output, 15 / 1e6);
   assert.equal(estimateCost('my-local-llama', { freshInputTokens: 1e6, cacheWriteTokens: 0, cachedInputTokens: 0, outputTokens: 0 }), null);
+});
+
+test('prices the current Claude and GPT-6 releases at their own rates', () => {
+  const r = (model) => {
+    const p = getPricing(model);
+    return [p.input, p.output, p.cacheWrite, p.cacheRead].map((n) => Number((n * 1e6).toFixed(4)));
+  };
+  assert.deepEqual(r('anthropic/claude-fable-5-2'), [8, 40, 10, 0.2]);
+  assert.deepEqual(r('claude-mythos-5.1'), [10, 50, 12.5, 0.25]);
+  assert.deepEqual(r('claude-opus-5-5'), [4, 20, 5, 0.2]);
+  assert.deepEqual(r('claude-sonnet-5.5'), [2, 10, 2.5, 0.1]);
+  assert.deepEqual(r('claude-haiku-5-5'), [0.1, 0.5, 0.125, 0.01]);
+  assert.deepEqual(r('claude-opus-5-20260401'), [5, 25, 6.25, 0.5]);
+  assert.deepEqual(r('gpt-6-astra'), [10, 50, 12.5, 1]);
+  assert.deepEqual(r('openai/gpt-6.1-sol'), [2, 10, 2.5, 0.1]);
+  assert.deepEqual(r('gpt-6.1-terra'), [1, 5, 1.25, 0.05]);
+  assert.deepEqual(r('gpt-6-sol'), [2, 10, 2.5, 0.2]);
+  assert.deepEqual(r('gpt-6-luna'), [0.1, 0.5, 0.125, 0.01]);
+  assert.deepEqual(r('gpt-5.6-sol'), [4, 20, 5, 0.4]);
+});
+
+test('Haiku 5.5 switches every token to the long-prompt rates above 100K prompt tokens', () => {
+  const short = estimateCost('claude-haiku-5-5', { freshInputTokens: 50000, cacheWriteTokens: 0, cachedInputTokens: 50000, outputTokens: 1000 });
+  assert.ok(Math.abs(short - (50000 * 0.10 + 50000 * 0.01 + 1000 * 0.50) / 1e6) < 1e-12);
+  const long = estimateCost('claude-haiku-5-5', { freshInputTokens: 50000, cacheWriteTokens: 0, cachedInputTokens: 50001, outputTokens: 1000 });
+  assert.ok(Math.abs(long - (50000 * 0.50 + 50001 * 0.05 + 1000 * 2.50) / 1e6) < 1e-12);
 });
 
 test('estimate charges fresh input, cache write, cache read and output separately', () => {
@@ -197,4 +223,22 @@ test('a non-OpenRouter provider leaves no OpenRouter row to reconcile against', 
   // Difference tile in the dashboard.
   assert.equal(Number(result.totals.backfilledCost.toFixed(4)), Number(result.totals.totalCost.toFixed(4)));
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('Haiku 5.5 picks its rate tier per step, not from the turn total', () => {
+  // Four tool steps of 30K prompt each: 120K summed, but no single call is over 100K.
+  const parts = [1, 2, 3, 4].map(() => step(30000, 500, 0, 0, 0, 0));
+  const usage = usageFromParts(parts, {});
+  assert.equal(usage.freshInputTokens, 120000);
+  const cost = estimateCost('claude-haiku-5-5', usage);
+  assert.ok(Math.abs(cost - 4 * (30000 * 0.10 + 500 * 0.50) / 1e6) < 1e-12);
+  // A single step over the threshold still pays the long rates.
+  const big = usageFromParts([step(120000, 500, 0, 0, 0, 0)], {});
+  assert.ok(Math.abs(estimateCost('claude-haiku-5-5', big) - (120000 * 0.50 + 500 * 2.50) / 1e6) < 1e-12);
+});
+
+test('GPT-5.6 bills cache writes while GPT-5.5 does not', () => {
+  assert.equal(getPricing('gpt-5.6').cacheWrite, 6.25 / 1e6);
+  assert.equal(getPricing('gpt-5.6-2026-07-09').cacheWrite, 6.25 / 1e6);
+  assert.equal(getPricing('gpt-5.5').cacheWrite, 0);
 });

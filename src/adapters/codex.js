@@ -28,12 +28,14 @@ const MODEL_PRICING = {
   'gpt-5.5': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6, longContext: true },
   'gpt-5.6-luna': { input: 0.20 / 1e6, cachedInput: 0.02 / 1e6, output: 1.20 / 1e6, longContext: true },
   'gpt-5.6-terra': { input: 2.00 / 1e6, cachedInput: 0.20 / 1e6, output: 12.00 / 1e6, longContext: true },
-  // Promotional rate, listed as available at least through 2026-11-21.
+  // Promotional rate, listed as available until 2026-11-30.
   'gpt-5.6-sol': { input: 4.00 / 1e6, cachedInput: 0.40 / 1e6, output: 20.00 / 1e6, longContext: true },
   'gpt-5.6': { input: 5.00 / 1e6, cachedInput: 0.50 / 1e6, output: 30.00 / 1e6, longContext: true },
   'gpt-6-luna': { input: 0.10 / 1e6, cachedInput: 0.01 / 1e6, output: 0.50 / 1e6, longContext: true },
   'gpt-6-sol': { input: 2.00 / 1e6, cachedInput: 0.20 / 1e6, output: 10.00 / 1e6, longContext: true },
   'gpt-6-astra': { input: 10.00 / 1e6, cachedInput: 1.00 / 1e6, output: 50.00 / 1e6, longContext: true },
+  'gpt-6.1-terra': { input: 1.00 / 1e6, cachedInput: 0.05 / 1e6, output: 5.00 / 1e6, longContext: true },
+  'gpt-6.1-sol': { input: 2.00 / 1e6, cachedInput: 0.10 / 1e6, output: 10.00 / 1e6, longContext: true },
 };
 const LONG_CONTEXT_THRESHOLD = 272000;
 // Longest key first, so e.g. "gpt-5.4-mini" matches before the "gpt-5.4" fallback.

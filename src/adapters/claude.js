@@ -37,35 +37,74 @@ function summarizeLimitHits(hits) {
 }
 
 // Anthropic API per-token pricing (estimate; subscription billing differs).
-// Cache rates are the standard 1.25x write / 0.1x read multipliers on input,
-// except Fable 5.1 / Mythos 5.1 (0.025x read) and Opus 5.5 (0.05x read).
-// List rates as of 2026-09-23.
+// Cache writes are 1.25x input for the 5-minute TTL and 2x for the 1-hour TTL.
+// Cache reads are 0.1x input, except Fable/Mythos 5.1 and 5.2 (0.025x) and
+// Opus 5.5 / Sonnet 5.5 (0.05x).
+// List rates as of 2026-11-11: https://platform.claude.com/docs/en/about-claude/pricing
+const rates = (input, output, readMultiplier = 0.1) => ({
+  input: input / 1e6,
+  output: output / 1e6,
+  cacheWrite: (input * 1.25) / 1e6,
+  cacheWrite1h: (input * 2) / 1e6,
+  cacheRead: (input * readMultiplier) / 1e6,
+});
 const MODEL_PRICING = {
-  'fable-5.1': { input: 10 / 1e6, output: 50 / 1e6, cacheWrite: 12.50 / 1e6, cacheRead: 0.25 / 1e6 },
-  'fable-5': { input: 10 / 1e6, output: 50 / 1e6, cacheWrite: 12.50 / 1e6, cacheRead: 1.00 / 1e6 },
-  'opus-5.5': { input: 4 / 1e6, output: 20 / 1e6, cacheWrite: 5 / 1e6, cacheRead: 0.20 / 1e6 },
-  'opus-5': { input: 5 / 1e6, output: 25 / 1e6, cacheWrite: 6.25 / 1e6, cacheRead: 0.50 / 1e6 },
-  'opus-4.0': { input: 15 / 1e6, output: 75 / 1e6, cacheWrite: 18.75 / 1e6, cacheRead: 1.50 / 1e6 },
-  'sonnet-5': { input: 2 / 1e6, output: 10 / 1e6, cacheWrite: 2.50 / 1e6, cacheRead: 0.20 / 1e6 },
-  sonnet: { input: 3 / 1e6, output: 15 / 1e6, cacheWrite: 3.75 / 1e6, cacheRead: 0.30 / 1e6 },
-  'haiku-4.5': { input: 1 / 1e6, output: 5 / 1e6, cacheWrite: 1.25 / 1e6, cacheRead: 0.10 / 1e6 },
-  'haiku-3.5': { input: 0.80 / 1e6, output: 4 / 1e6, cacheWrite: 1.00 / 1e6, cacheRead: 0.08 / 1e6 },
+  'fable-5.2': rates(8, 40, 0.025),
+  'fable-5.1': rates(10, 50, 0.025),
+  'fable-5': rates(10, 50),
+  'opus-5.5': rates(4, 20, 0.05),
+  'opus-5': rates(5, 25),
+  'opus-4.0': rates(15, 75),
+  'sonnet-5.5': rates(2, 10, 0.05),
+  'sonnet-5': rates(2, 10),
+  sonnet: rates(3, 15),
+  // Haiku 5.5 is priced by prompt length: a request whose prompt (fresh input
+  // plus cache writes plus cache reads) exceeds 100K tokens pays the higher
+  // rates on every token in that request.
+  'haiku-5.5': { ...rates(0.10, 0.50), longPrompt: { threshold: 100000, rates: rates(0.50, 2.50) } },
+  'haiku-4.5': rates(1, 5),
+  'haiku-3.5': rates(0.80, 4),
 };
 // Model ids arrive dashed (claude-opus-4-6) or dotted (opus-4.6), so every
 // version test below accepts either spelling.
 // `(?!\d)` keeps a dated snapshot such as opus-5-20260401 off the 5.5 tier.
 const PRICING_RULES = [
+  [/(fable|mythos)-5[-.]2(?!\d)/, MODEL_PRICING['fable-5.2']],
   [/(fable|mythos)-5[-.]1(?!\d)/, MODEL_PRICING['fable-5.1']],
   [/(fable|mythos)/, MODEL_PRICING['fable-5']],
   [/opus-5[-.]5(?!\d)/, MODEL_PRICING['opus-5.5']],
   // Opus 4.5 introduced the $5/$25 tier and every release since has kept it.
   [/opus-(5|4[-.](5|6|7|8|9))/, MODEL_PRICING['opus-5']],
   [/opus/, MODEL_PRICING['opus-4.0']],
+  [/sonnet-5[-.]5(?!\d)/, MODEL_PRICING['sonnet-5.5']],
   [/sonnet-5/, MODEL_PRICING['sonnet-5']],
   [/sonnet/, MODEL_PRICING.sonnet],
+  [/haiku-5[-.]5(?!\d)/, MODEL_PRICING['haiku-5.5']],
   [/3[-.]5-haiku|haiku-3[-.]5/, MODEL_PRICING['haiku-3.5']],
   [/haiku/, MODEL_PRICING['haiku-4.5']],
 ];
+// Cost of one API response. `cache_creation` splits cache writes by TTL; the
+// 1-hour ones cost 2x input rather than 1.25x. Older logs lack the split, so
+// any write it does not account for is priced as a 5-minute write.
+function turnCost(p, u) {
+  const n = (v) => Math.max(0, Number(v) || 0);
+  const oneHourRaw = n(u.cache_creation?.ephemeral_1h_input_tokens);
+  const cacheCreate = u.cache_creation_input_tokens != null
+    ? n(u.cache_creation_input_tokens)
+    : n(u.cache_creation?.ephemeral_5m_input_tokens) + oneHourRaw;
+  const oneHour = Math.min(cacheCreate, oneHourRaw);
+  return (u.input_tokens || 0) * p.input
+    + (cacheCreate - oneHour) * p.cacheWrite
+    + oneHour * p.cacheWrite1h
+    + (u.cache_read_input_tokens || 0) * p.cacheRead
+    + (u.output_tokens || 0) * p.output;
+}
+
+// The rates that apply to one request, given its total prompt size.
+function ratesForPrompt(pricing, promptTokens) {
+  const tier = pricing && pricing.longPrompt;
+  return tier && promptTokens > tier.threshold ? tier.rates : pricing;
+}
 // A bare family alias ("sonnet", "opus") means the log never recorded which
 // generation actually served the request — that cannot be recovered after the
 // fact, so price it as unpriced rather than silently guessing a generation.
@@ -125,9 +164,7 @@ function extractTurns(entries) {
       // Treat all input flavors (fresh + cache write + cache read) as input volume,
       // and cacheRead as the "cached" slice, to match the dashboard's token model.
       const totalInput = inputTokens + cacheCreate + cacheRead;
-      const cost = pricing
-        ? inputTokens * pricing.input + cacheCreate * pricing.cacheWrite + cacheRead * pricing.cacheRead + outputTokens * pricing.output
-        : 0;
+      const cost = pricing ? turnCost(ratesForPrompt(pricing, totalInput), u) : 0;
       byId.set(msgId, turns.length);
       turns.push({
         turnId: msgId,
@@ -340,4 +377,4 @@ async function content(session, options = {}) {
   return { items, promptTemplate };
 }
 
-module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content, _test: { getPricing, latestCostState, reconcileWithCostState } };
+module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content, _test: { getPricing, ratesForPrompt, turnCost, latestCostState, reconcileWithCostState } };
