@@ -205,10 +205,22 @@ function latestCostState(entries) {
 // total per model, not a per-turn figure, so the *relative* cost across turns
 // stays proportional to our own input/output/cache estimate — only the total
 // is corrected to the real, billed figure.
+//
+// The snapshot only covers the current Claude Code process (`startTime`, epoch
+// ms). A resumed session's file also holds responses from earlier runs, which
+// the snapshot never saw — those keep their own estimate instead of being
+// squeezed into the latest run's total.
+function coveredByCostState(turn, costState) {
+  const start = Number(costState.startTime);
+  if (!Number.isFinite(start) || start <= 0) return true;
+  const ts = Date.parse(turn.timestamp);
+  return !Number.isFinite(ts) || ts >= start;
+}
 function reconcileWithCostState(turns, costState) {
   if (!costState) return;
   const byModel = new Map();
   for (const turn of turns) {
+    if (!coveredByCostState(turn, costState)) continue;
     if (!byModel.has(turn.model)) byModel.set(turn.model, []);
     byModel.get(turn.model).push(turn);
   }
@@ -227,6 +239,26 @@ function reconcileWithCostState(turns, costState) {
     const tokenTotal = group.reduce((sum, turn) => sum + (turn.totalTokens || 0), 0);
     if (tokenTotal <= 0) continue;
     for (const turn of group) { turn.cost = reportedCost * (turn.totalTokens / tokenTotal); turn.costEstimated = true; turn.costReported = true; }
+  }
+}
+
+// Claude Code writes each subagent's transcript to
+// `<project>/<sessionId>/subagents/*.jsonl`, separate from the session file.
+function subagentFiles(projectDir, sessionId) {
+  const dir = path.join(projectDir, sessionId, 'subagents');
+  try { return fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')).sort().map((f) => path.join(dir, f)); } catch { return []; }
+}
+
+// Orders a session's own and subagent turns by time, and files each subagent
+// turn under the user prompt that was active in the main conversation when it
+// ran, rather than under the task text the subagent was handed.
+function attributeSubagentTurns(turns) {
+  const at = (t) => { const ms = Date.parse(t.timestamp); return Number.isFinite(ms) ? ms : Infinity; };
+  turns.sort((a, b) => at(a) - at(b));
+  let activePrompt = null;
+  for (const turn of turns) {
+    if (!turn.subagent) { if (turn.prompt) activePrompt = turn.prompt; continue; }
+    if (activePrompt) turn.prompt = activePrompt;
   }
 }
 
@@ -269,18 +301,41 @@ async function parse(options = {}) {
 
   for (const projectDir of projectDirs) {
     const dir = path.join(projectsDir, projectDir);
-    let files;
-    try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')); } catch { continue; }
-    for (const file of files) {
-      const filePath = path.join(dir, file);
-      const sessionId = path.basename(file, '.jsonl');
-      let entries;
-      try { entries = await parseJSONLFile(filePath); } catch { continue; }
-      if (!entries.length) continue;
+    let names;
+    try { names = fs.readdirSync(dir); } catch { continue; }
+    // A session is its own `<id>.jsonl` plus any `<id>/subagents/*.jsonl`.
+    const sessionIds = new Set(names.filter((f) => f.endsWith('.jsonl')).map((f) => path.basename(f, '.jsonl')));
+    for (const name of names) if (subagentFiles(dir, name).length) sessionIds.add(name);
+    for (const sessionId of sessionIds) {
+      const mainPath = path.join(dir, `${sessionId}.jsonl`);
+      let entries = [];
+      if (fs.existsSync(mainPath)) { try { entries = await parseJSONLFile(mainPath); } catch { continue; } }
       for (const e of entries) { const hit = limitHitFromEntry(e); if (hit) limitHits.push(hit); }
       const rawTurns = extractTurns(entries);
+
+      const subFiles = [];
+      const subEntries = [];
+      const seenIds = new Set(rawTurns.map((t) => t.turnId));
+      for (const subPath of subagentFiles(dir, sessionId)) {
+        let sub;
+        try { sub = await parseJSONLFile(subPath); } catch { continue; }
+        subFiles.push(subPath);
+        subEntries.push(...sub);
+        for (const e of sub) { const hit = limitHitFromEntry(e); if (hit) limitHits.push(hit); }
+        for (const turn of extractTurns(sub)) {
+          if (seenIds.has(turn.turnId)) continue;
+          seenIds.add(turn.turnId);
+          turn.subagent = true;
+          rawTurns.push(turn);
+        }
+      }
       if (!rawTurns.length) continue;
+      if (subFiles.length) attributeSubagentTurns(rawTurns);
+      // The parent's snapshot already includes its subagents' spend, so
+      // reconcile only once all of the session's turns are in.
       reconcileWithCostState(rawTurns, latestCostState(entries));
+      const filePath = entries.length ? mainPath : subFiles[0];
+      entries = entries.concat(subEntries);
 
       // Normalize project label from the encoded dir name (cwd path with '-' separators).
       const cwd = entries.find((e) => e.cwd)?.cwd || projectDir.replace(/^-/, '/').replace(/-/g, '/');
@@ -293,8 +348,9 @@ async function parse(options = {}) {
         toolEvents.push({ name, prompt: t.prompt, timestamp: t.timestamp });
       }
 
-      const firstTs = entries.find((e) => e.timestamp)?.timestamp || null;
-      const lastTs = entries.slice().reverse().find((e) => e.timestamp)?.timestamp || firstTs;
+      const stamps = entries.map((e) => e.timestamp).filter(Boolean).sort();
+      const firstTs = stamps[0] || null;
+      const lastTs = stamps[stamps.length - 1] || firstTs;
       const date = firstTs ? localDay(firstTs) : 'unknown';
       const modelCounts = {};
       for (const t of rawTurns) modelCounts[t.model] = (modelCounts[t.model] || 0) + 1;
@@ -303,7 +359,7 @@ async function parse(options = {}) {
       const promptBreakdown = buildPromptBreakdown(rawTurns, toolEvents, title);
 
       sessions.push({
-        sessionId, filePath, archived: false,
+        sessionId, filePath, subagentFiles: subFiles, archived: false,
         title: String(title).slice(0, 240), project, cwd, date,
         timestamp: firstTs, updatedTimestamp: lastTs, model: primaryModel,
         turnCount: rawTurns.length, agentMessages: rawTurns.length,
@@ -333,8 +389,12 @@ async function parse(options = {}) {
 // On-demand per-turn content for one session: assistant output text + tool calls
 // (with their results, which Claude logs as tool_result blocks in the next user msg).
 async function content(session, options = {}) {
-  let entries;
-  try { entries = await parseJSONLFile(session.filePath); } catch { return { items: [] }; }
+  let entries = [];
+  for (const file of [session.filePath, ...(session.subagentFiles || [])]) {
+    if (!file || !fs.existsSync(file)) continue;
+    try { entries = entries.concat(await parseJSONLFile(file)); } catch { /* skip unreadable file */ }
+  }
+  if (!entries.length) return { items: [] };
   const toolResults = {};
   for (const e of entries) {
     const c = e.message && e.message.content;
@@ -367,6 +427,9 @@ async function content(session, options = {}) {
     items.push({ turnId: msgId, timestamp: e.timestamp || null, output, tools });
   }
   for (const it of items) it.output = clip(it.output);
+  // Subagent responses were appended after the main file's; interleave by time.
+  const at = (it) => { const ms = Date.parse(it.timestamp); return Number.isFinite(ms) ? ms : Infinity; };
+  items.sort((a, b) => at(a) - at(b));
   // Best-effort, offline system-prompt *template* from the local binary. Never
   // let this break the content endpoint.
   let promptTemplate = null;
@@ -377,4 +440,4 @@ async function content(session, options = {}) {
   return { items, promptTemplate };
 }
 
-module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content, _test: { getPricing, ratesForPrompt, turnCost, latestCostState, reconcileWithCostState } };
+module.exports = { id, label, mark, accent, capabilities, home, detect, parse, content, _test: { getPricing, ratesForPrompt, turnCost, latestCostState, reconcileWithCostState, attributeSubagentTurns } };

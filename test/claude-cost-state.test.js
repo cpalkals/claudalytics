@@ -87,3 +87,18 @@ test('ignores a costUSD that is missing, non-finite, or the wrong type', () => {
     assert.equal(turns[0].costReported, false);
   }
 });
+
+test("leaves turns from before the snapshot's run alone in a resumed session", () => {
+  const start = Date.parse('2026-11-06T18:00:00Z');
+  const turns = [
+    { model: 'claude-opus-5-5', timestamp: '2026-11-05T10:00:00Z', cost: 0.50, totalTokens: 100, costEstimated: true, costReported: false },
+    { model: 'claude-opus-5-5', timestamp: '2026-11-06T18:05:00Z', cost: 0.30, totalTokens: 100, costEstimated: true, costReported: false },
+    { model: 'claude-opus-5-5', timestamp: '2026-11-06T18:10:00Z', cost: 0.10, totalTokens: 100, costEstimated: true, costReported: false },
+  ];
+  reconcileWithCostState(turns, { startTime: start, modelUsage: { 'claude-opus-5-5': { costUSD: 0.60 } } });
+
+  assert.equal(turns[0].cost, 0.50, 'an earlier run keeps its own estimate');
+  assert.equal(turns[0].costReported, false);
+  assert.ok(Math.abs(turns[1].cost + turns[2].cost - 0.60) < 1e-9, 'only the covered run is scaled to the snapshot');
+  assert.ok(Math.abs(turns[1].cost / turns[2].cost - 3) < 1e-9);
+});
