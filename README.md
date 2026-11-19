@@ -75,7 +75,7 @@ To add an agent, drop a new adapter module in `src/adapters/`, register it in
 `src/adapters/index.js`, and the UI picks it up automatically.
 
 - `GET /api/sources` — all known agents + whether their data is present
-- `GET /api/data?source=<id>&range=<day|week|month|all>` — normalized dashboard
+- `GET /api/data?source=<id>&range=<day|week|month|thismonth|all>` — normalized dashboard
   data for one agent, scoped to a date range (default `all`); every breakdown,
   KPI, chart, session, prompt and insight is recomputed for that range server-side
 - `GET /api/refresh?source=<id>` — re-parse one agent
@@ -83,7 +83,7 @@ To add an agent, drop a new adapter module in `src/adapters/`, register it in
 ## Dashboard
 
 - **Agent switcher** — segmented control of detected agents; per-agent accent/branding.
-- **Range filter** — Today / Last 7 days / Last 30 days / All time, applied globally
+- **Range filter** — Today / Last 7 days / Last 30 days / This month (calendar month to date) / All time, applied globally
   to every KPI, chart, session, prompt, and insight — not just cost.
 - **KPI strip** — total / cached tokens, sessions, and adaptive stats for whatever
   the agent supports (reasoning and/or est. cost, falling back to output share).

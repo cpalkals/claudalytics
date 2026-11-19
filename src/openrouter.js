@@ -177,6 +177,7 @@ function localWindow(range, now = new Date()) {
   start.setHours(0, 0, 0, 0);
   if (range === 'week') start.setDate(start.getDate() - 6);
   else if (range === 'month') start.setDate(start.getDate() - 29);
+  else if (range === 'thismonth') start.setDate(1);
   else if (range !== 'day') start.setFullYear(start.getFullYear() - 2);
   return { start: start.toISOString(), end: end.toISOString() };
 }
@@ -226,7 +227,7 @@ function normalizeActivity(rows) {
 // UTC day strings for the window a dashboard range covers. `all` means "no
 // filter" — the caller falls back to the key's own all-time total.
 function utcDaysForRange(range, now = new Date()) {
-  const spans = { day: 1, week: 7, month: 30 };
+  const spans = { day: 1, week: 7, month: 30, thismonth: now.getUTCDate() };
   const days = spans[range];
   if (!days) return null;
   const out = [];
@@ -273,6 +274,7 @@ function spendFromKey(data, range) {
     day: ['usage_daily', 'byok_usage_daily'],
     week: ['usage_weekly', 'byok_usage_weekly'],
     month: ['usage_monthly', 'byok_usage_monthly'],
+    thismonth: ['usage_monthly', 'byok_usage_monthly'],
     all: ['usage', 'byok_usage'],
   }[range] || ['usage', 'byok_usage'];
   return num(data[pick[0]]) + num(data[pick[1]]);
@@ -368,6 +370,7 @@ async function fetchSpend(range = 'all') {
       day: spendFromKey(info, 'day'),
       week: spendFromKey(info, 'week'),
       month: spendFromKey(info, 'month'),
+      thismonth: spendFromKey(info, 'thismonth'),
       all: spendFromKey(info, 'all'),
     },
     caveats: (costSource === 'analytics'

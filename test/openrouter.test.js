@@ -218,3 +218,13 @@ test('the payload never carries the API key back to the browser', async (t) => {
   const out = await openrouter.fetchSpend('all');
   assert.ok(!JSON.stringify(out).includes('sk-or-secret-value'));
 });
+
+test('thismonth covers the calendar month to date, not a rolling 30 days', () => {
+  const { localWindow, utcDaysForRange, spendFromKey } = openrouter._test;
+  const now = new Date('2026-11-19T15:00:00Z');
+  const days = utcDaysForRange('thismonth', now);
+  assert.equal(days.size, 19);
+  assert.ok(days.has('2026-11-01') && !days.has('2026-10-31'));
+  assert.equal(new Date(localWindow('thismonth', now).start).getDate(), 1, 'starts on the 1st, local midnight');
+  assert.equal(spendFromKey(KEY_INFO, 'thismonth'), spendFromKey(KEY_INFO, 'month'));
+});

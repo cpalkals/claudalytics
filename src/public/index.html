@@ -584,7 +584,7 @@ function render(){
 }
 
 function agentBarInner(){if(!SOURCES.length)return'';return SOURCES.map(s=>`<button class="agent ${s.id===sourceId?'on':''}" ${s.available?'':'disabled'} title="${s.available?esc(s.home):'not detected on this machine'}" onclick="setSource('${s.id}')"><span class="amark" style="background:${s.available?s.accent:'var(--surface-3)'};color:${s.available?accentFg(s.accent):'var(--faint)'}">${esc(s.mark)}</span>${esc(s.label)}${s.available?'':' <span class="muted" style="font-size:10px">·n/a</span>'}</button>`).join('')}
-function rangeBarInner(){return`<span class="rangebar-label">Range</span><div class="chips">${['day','week','month','all'].map(r=>`<span class="chip ${range===r?'on':''}" onclick="setRange('${r}')">${esc(RANGE_LABEL[r])}</span>`).join('')}</div>`}
+function rangeBarInner(){return`<span class="rangebar-label">Range</span><div class="chips">${['day','week','month','thismonth','all'].map(r=>`<span class="chip ${range===r?'on':''}" onclick="setRange('${r}')">${esc(RANGE_LABEL[r])}</span>`).join('')}</div>`}
 function accentFg(hex){if(!hex)return'#fff';const c=hex.replace('#','');const lum=(0.299*parseInt(c.slice(0,2),16)+0.587*parseInt(c.slice(2,4),16)+0.114*parseInt(c.slice(4,6),16))/255;return lum>0.6?'#1a1306':'#fff'}
 function kpiStrip(t,c){const cachePct=t.totalTokens?Math.round(t.cachedInputTokens/t.totalTokens*100):0;const reasonPct=t.outputTokens?Math.round(t.reasoningOutputTokens/t.outputTokens*100):0;
   const adaptive=[];
@@ -596,7 +596,7 @@ function kpiStrip(t,c){const cachePct=t.totalTokens?Math.round(t.cachedInputToke
     +adaptive.join('')
     +kpi('Sessions',fmt(t.totalSessions),`${fmt(t.totalPrompts)} prompts · ${fmt(t.totalToolCalls)} tools`)}
 function kpi(label,value,hint){return`<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="hint">${esc(hint)}</div></div>`}
-const RANGE_LABEL={day:'Today',week:'Last 7 days',month:'Last 30 days',all:'All time'};
+const RANGE_LABEL={day:'Today',week:'Last 7 days',month:'Last 30 days',thismonth:'This month',all:'All time'};
 function costKpi(t){const cost=t.totalCost||0;const value=cost>=1000?'$'+(cost/1000).toFixed(1)+'K':'$'+cost.toFixed(2),coverage=Math.round((t.costCoverage??1)*100),partial=coverage<100,disclaimer=DATA.source?.costDisclaimer||'API-rate estimate, not a subscription bill.';
   return`<div class="kpi" title="${esc(disclaimer)}"><div class="label">Est. API Cost</div><div class="value">${value}</div><div class="hint">${esc(RANGE_LABEL[range])} · ${partial?coverage+'% priced':'standard rates'} · not subscription bill</div></div>`}
 function showErr(err){const app=document.getElementById('app');app.className='wrap';app.innerHTML=`<div class="card empty">${esc(err.message||err)}</div>`}

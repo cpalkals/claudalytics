@@ -37,9 +37,12 @@ function rescopeSession(session, turns) {
 }
 
 function scopeToRange(full, range) {
-  if (!range || range === 'all' || !(range in RANGE_DAYS)) return full;
+  if (!range || range === 'all' || !(range === 'thismonth' || range in RANGE_DAYS)) return full;
   const start = new Date();
-  start.setDate(start.getDate() - RANGE_DAYS[range]);
+  // `thismonth` is the calendar month to date (e.g. 1 Nov onward), unlike
+  // `month`, which is a rolling 30 days.
+  if (range === 'thismonth') start.setDate(1);
+  else start.setDate(start.getDate() - RANGE_DAYS[range]);
   const startStr = localDay(start);
 
   const scoped = [];
@@ -143,7 +146,7 @@ function createServer(options = {}) {
   });
 
   app.get('/api/openrouter', async (req, res) => {
-    const range = ['day', 'week', 'month', 'all'].includes(req.query.range) ? req.query.range : 'all';
+    const range = ['day', 'week', 'month', 'thismonth', 'all'].includes(req.query.range) ? req.query.range : 'all';
     if (!openrouter.enabled()) return res.json({ enabled: false });
     const hit = spendCache.get(range);
     if (hit && Date.now() - hit.at < SPEND_TTL_MS && !req.query.force) return res.json(hit.payload);
